@@ -1,0 +1,149 @@
+# =============================================================================
+#  Zone Companions  -  code patches
+# -----------------------------------------------------------------------------
+#  The complete list of changes this mod makes to base-game code. Seven code
+#  entries. Nothing else in the game is touched.
+#
+#  WHAT HAPPENS WHEN A `find` STRING STOPS MATCHING
+#  Not a total failure, which an earlier version of this comment claimed. GMLoader
+#  calls importGroup.Import() once *per patch*, inside a try/catch (Program.cs
+#  lines 914-931). ThrowOnNoOpFindReplace = true does throw when a find string
+#  misses, but the throw is caught: that one patch is skipped, a Warning naming
+#  the file, the script, the find string and the code string is logged, and the
+#  run carries on. data.win is still written. A non-zero exception count only
+#  suppresses auto-start (Program.cs line 760) and prints a warning (line 776).
+#
+#  So a game update that shifts the decompiled output degrades one feature and
+#  says exactly which -- it does not brick the install. That is what makes the two
+#  find-based patches below acceptable.
+#
+#  WHY THE FIRST FIVE ARE `append` AND THE LAST TWO ARE NOT
+#  The first five target object *events*, which are bare statement lists, so
+#  appending needs no find string at all and cannot drift. Each of them also needs
+#  state the vanilla event sets up:
+#    - obj_controller_Create_0 calls faction_load() at line 25, which rebuilds
+#      both faction registries. Registering the companion faction before that
+#      would be wiped out immediately.
+#    - obj_controller_Draw_64 sets display_set_gui_size(480, 270) on line 1.
+#      Prepended draw calls would land in the wrong coordinate space, and would
+#      be painted over by the game's own HUD.
+#    - obj_player_Step_0 runs the player's state machine, so appending means the
+#      squad reacts to this frame's player position, not last frame's.
+#
+#  The last two target GlobalScripts, which wrap a `function` declaration. There,
+#  `append` and `prepend` would land *outside* the function braces -- dead code at
+#  global scope that never runs. `findprependtrim` is the only way in: it matches
+#  on trimmed lines, so it survives indentation changes, and inserts inside the
+#  body.
+#
+#  All five event hosts were checked to be flat, top-level, branch-free code with
+#  no early `exit`, so appended code always runs. obj_controller_Create_0 and
+#  obj_controller_Draw_64 end with a decompiler-emitted `enum UnknownEnum` block;
+#  appended statements land after it, which is valid because enum declarations
+#  are compile-time and carry no execution order.
+#
+#  Load order is not a concern: these are the only patches the mod ships and they
+#  target seven distinct code entries.
+#
+#  NOTE ON THE mods/code/ FOLDER, WHICH IS A DIFFERENT MECHANISM
+#  5_ImportGML.csx line 35 imports every .gml file there with QueueReplace, so a
+#  file named after an existing game script REPLACES it wholesale. That is why the
+#  friendly-fire hooks below are two-line find patches rather than modified copies
+#  of the vanilla scripts: a copy would silently go stale against the next game
+#  update instead of logging a warning.
+# =============================================================================
+
+
+# --- 1. Boot ------------------------------------------------------------------
+#  obj_cursor is created during the logo screen, which the GMLoader ZERO Sievert
+#  guide documents as the earliest usable entry point. Logging and configuration
+#  are therefore live before any gameplay object exists.
+#  csq_boot() is idempotent, and every other entry point calls it too, so the mod
+#  still initialises correctly even if this is the patch that fails.
+gml_Object_obj_cursor_Create_0:
+  - type: append
+
+    code: |-
+        csq_boot();
+
+
+# --- 2. Map load --------------------------------------------------------------
+#  Runs on every hub and raid load, after faction_load() has rebuilt the faction
+#  registries. Registers the companion faction, restores the roster from the save
+#  and arms the deferred spawn.
+gml_Object_obj_controller_Create_0:
+  - type: append
+
+    code: |-
+        csq_on_map_load();
+
+
+# --- 3. Per-frame tick --------------------------------------------------------
+#  obj_player_Step_0 runs every tick in both hub and raid, and cannot run before
+#  a player instance exists -- which makes it the correct home for keybinds,
+#  roster reconciliation and the deferred spawn.
+gml_Object_obj_player_Step_0:
+  - type: append
+
+    code: |-
+        csq_tick();
+
+
+# --- 4. HUD -------------------------------------------------------------------
+#  Appended at the very end of the Draw GUI event so the squad panel sits on top
+#  of the game's own HUD rather than under it. GUI space here is 480x270.
+gml_Object_obj_controller_Draw_64:
+  - type: append
+
+    code: |-
+        csq_hud_draw();
+
+
+# --- 5. Raid exit -------------------------------------------------------------
+#  The end-of-raid screen. Companions leave the world and the roster is committed
+#  to the save slot, so HP carried out of one raid is there at the start of the
+#  next. Safe to write here: this event only reads the save database via
+#  db_read_ext, which never leaves a database open.
+gml_Object_obj_exit_screen_Create_0:
+  - type: append
+
+    code: |-
+        csq_on_raid_exit();
+
+
+# --- 6. Friendly fire: companion bullets vs the player ------------------------
+#  bullet_can_collide_with_player decides whether a bullet is allowed to touch the
+#  player at all. Returning false here means the round is NOT consumed -- it passes
+#  straight through and can still kill the enemy the companion was aiming at.
+#  Blocking at the damage stage instead would eat the bullet on the player's hitbox.
+#
+#  The anchor is the line immediately after the function's own
+#      if (!instance_exists(arg1)) { return false; }
+#  guard, so arg1 is known to exist by the time the injected call runs. The string
+#  occurs exactly once in this code entry.
+gml_GlobalScript_bullet_can_collide_with_player:
+  - type: findprependtrim
+    find: |-
+        if (player_get_hp(arg1.mp_index) > 0)
+
+    code: |-
+        if (csq_ff_block_bullet_on_player(arg0, arg1)) { return false; }
+
+
+# --- 7. Friendly fire: player bullets vs companions --------------------------
+#  Same idea on the NPC side. Note that companion-on-companion fire is already
+#  impossible in vanilla -- this predicate requires
+#      arg0.shooter_faction != arg1.faction
+#  and the whole squad shares one faction -- so the only case this patch actually
+#  changes is the player shooting their own people. It is still checked both ways
+#  in csq_ff so the protection does not depend on that.
+#
+#  Anchored one line later than the patch above because this function's guard is
+#  followed by `if (arg1.can_be_damaged)` rather than the hp test. Occurs once.
+gml_GlobalScript_bullet_can_collide_with_npc:
+  - type: findprependtrim
+    find: |-
+        if (arg1.can_be_damaged)
+
+    code: |-
+        if (csq_ff_block_bullet_on_companion(arg0, arg1)) { return false; }

@@ -1,0 +1,11 @@
+{
+  "Sprite": "s_pg_loner_armor1_idle",
+  "Parent": "obj_npc_human_parent",
+  "TextureMaskID": "s_hitbox_player",
+  "CollisionShape": "Box",
+  "IsVisible": true,
+  "IsSolid": false,
+  "IsPersistent": false,
+  "UsesPhysics": false,
+  "IsSensor": false
+}
