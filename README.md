@@ -1,5 +1,17 @@
 # Zone Companions
 
+---
+
+> [!NOTE]
+> **🤖 Fully vibe-coded.** This mod was built entirely with Claude Opus 5, using
+> API credits from [Agent Router](https://agentrouter.org/register?aff=C3yz).
+> Total cost to code it: **~$160**. If this mod is useful to you and you want to
+> support future work, signing up through [my referral link](https://agentrouter.org/register?aff=C3yz)
+> gets you **$50 in free API credits** — no obligation, just an option if you were
+> going to sign up anyway.
+
+---
+
 **A squad of NPC companions for ZERO Sievert.** They spawn beside you at the
 start of every raid, follow you in formation, fight what you fight, patch you up
 when you are hurt, and carry their injuries between raids.
