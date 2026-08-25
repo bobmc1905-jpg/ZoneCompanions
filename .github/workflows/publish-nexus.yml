@@ -47,7 +47,7 @@ jobs:
   nexus:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: Nexus-Mods/upload-action@c96019556046053aa26044b44396cd38929daf23 # v1.0.0-beta.10
 
       - name: Resolve the version
         id: ver
