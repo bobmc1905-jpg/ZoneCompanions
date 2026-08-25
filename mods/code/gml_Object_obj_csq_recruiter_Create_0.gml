@@ -27,6 +27,9 @@
 //    csq_ff_disarm_grenades()
 //                        it carries no live ordnance, for the same reason companions
 //                        do not.
+//    npc_speaker_id = "no_speaker"
+//                        makes sure vanilla's own talk prompt never appears over the
+//                        recruiter alongside this mod's, whatever preset it wears.
 //    state="human_no_move"
 //                        the inert vanilla host state (see csq_ai). With no Step
 //                        event of its own this object inherits obj_npc_parent's Step,
@@ -44,6 +47,15 @@ npc_setup_weapon();
 
 csq_faction_apply(id);
 csq_ff_disarm_grenades();
+
+// Belt and braces on the talk prompt. The default recruiter_preset
+// (hub_loner_regular) already carries "speaker_id" : "no_speaker", so vanilla's
+// player_collect_nearby_interactables offers nothing for it and the only prompt over
+// its head is this mod's. Point recruiter_preset at a preset that *does* talk --
+// loner_regular's "guy", say -- and the player would get both prompts on the same
+// key, opening a stranger's small talk and the hire menu at once. The recruiter has
+// no vanilla dialogue to lose, so pin the value rather than depend on the config.
+npc_speaker_id = "no_speaker";
 
 // Never wander. "human_no_move" is a verified member of obj_npc_parent_Step_0's
 // state switch (see csq_ai); any non-vanilla string here would hard-crash.

@@ -22,7 +22,7 @@ same utility AI that makes bandits take cover, flank and reload, and the same
 `mp_grid` A\* pathfinding the base game uses. Nothing about their combat is
 re-implemented or faked.
 
-Version **1.1.0** · MIT licensed · Source and full docs:
+Version **1.1.1** · MIT licensed · Source and full docs:
 <https://github.com/bobmc1905-jpg/ZoneCompanions>
 
 ---

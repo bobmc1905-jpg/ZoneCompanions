@@ -47,7 +47,7 @@
 /// @func   csq_mod_name()
 /// @desc   Identity, reported in the log header and on error.
 function csq_mod_name()    { return "Zone Companions"; }
-function csq_mod_version() { return "1.1.0"; }
+function csq_mod_version() { return "1.1.1"; }
 
 
 /// @func   csq_boot()

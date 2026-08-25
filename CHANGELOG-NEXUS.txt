@@ -2,6 +2,24 @@ Zone Companions - Changelog
 Short version. The full, technical changelog is CHANGELOG.md.
 
 
+VERSION 1.1.1
+
+Fixed: Companion flashlights stayed off after going through a door
+- Walking into or out of a building used to kill a companion's flashlight for the
+  rest of the raid. Companions now notice a missing light and switch it back on.
+
+Fixed: Companions no longer reload the moment a fight starts
+- They spawned with an unfired weapon flagged as needing a reload, so first
+  contact began with them standing still for a couple of seconds. They now come
+  out of the hub ready to shoot. Reloading an actually empty magazine is
+  unchanged.
+
+Fixed: No more "press F to talk" on your own companions
+- Companions were built from a loner preset that has small talk attached, so
+  walking up to one in a raid offered a conversation - and got in the way of the
+  loot container behind them. They are silent now.
+
+
 VERSION 1.1.0
 
 New: Hire companions from an NPC for money

@@ -101,6 +101,11 @@ function csq_ai_init_instance()
     // to reset when an instance is culled and respawned, a charge count is not.
     csq_heal_cd       = 0;
 
+    // Countdown to the next flashlight-presence check. Zero means the very first
+    // Step verifies the light, which is what you want for a companion respawned
+    // mid-raid -- see csq_ai_torch_ensure for why it needs verifying at all.
+    csq_torch_timer   = 0;
+
     // ---- toughness ---------------------------------------------------------
     // npc_setup has just set hp from the preset -- 60 for loner_regular, the same
     // as the enemies you kill three at a time. A companion that fights alongside
@@ -955,6 +960,105 @@ function csq_ai_drive_medic(_player)
     {
         csq_log_exception("csq_ai_drive_medic", _err);
     }
+}
+
+
+/// @func   csq_ai_torch_ensure()
+/// @desc   Verify this companion still owns a flashlight, and re-light it if not.
+///         Called from the companion's Step event with `self` bound to the
+///         companion instance.
+///
+///         WHY A COMPANION'S FLASHLIGHT GOES OUT
+///         obj_npc_human_parent_Create_0 hands every human NPC its light exactly
+///         once, and nothing in the game ever gives one back:
+///             if (!is_in_hub())
+///             {
+///                 var ll = instance_create_depth(x, y, 0, obj_light_enemy_torch);
+///                 ll.id_linked = id;
+///             }
+///         That instance_create_depth is the only reference to obj_light_enemy_torch
+///         in the entire decompiled codebase.
+///
+///         Walking through a doorway teleports the *player* clear across the room
+///         (player_action_interact: x = indoor_id.tele_x, y = indoor_id.tele_y),
+///         which leaves the companion standing at the old position, outside the
+///         960x540 box obj_controller_Alarm_4 keeps activated. Within 20 frames the
+///         companion is deactivated, and its light dies one of two ways:
+///           - the torch is still active, evaluates instance_exists(id_linked) as
+///             false -- a deactivated instance reports as non-existent -- and runs
+///             the instance_destroy() in its own Step; or
+///           - the torch is culled in the same sweep and is stranded at the
+///             doorway, where instance_activate_region will not reach it again.
+///         csq_squad_recover_deactivated reactivates the companion and drops it
+///         next to the player either way, so the companion comes back but the light
+///         does not. Hence "the flashlight goes out going in or out of a building
+///         and never comes back on".
+///
+///         Vanilla hits the identical problem with the NPC's *weapon* and fixes it
+///         with a periodic presence check: obj_npc_human_parent_Step_0 counts to
+///         check_weapon_timer_max and re-fires alarm[9] whenever no obj_npc_weapon
+///         claims it. This is that pattern, applied to the light.
+/// @return {Bool} whether a replacement light was created
+function csq_ai_torch_ensure()
+{
+    // Vanilla creates no torch inside the hub, so neither does this. is_in_hub is
+    // also what gates the original line.
+    if (csq_in_hub()) return false;
+
+    // Defensive: an instance that somehow skipped csq_ai_init_instance still gets a
+    // working timer rather than a "variable not set" crash on the increment.
+    if (!variable_instance_exists(id, "csq_torch_timer")) csq_torch_timer = 0;
+
+    // Half a second. Vanilla's equivalent weapon check uses 120 frames, but a
+    // missing gun is invisible until the NPC shoots whereas a missing light is
+    // obvious the moment you look at the companion, so this one is four times
+    // keener. The work below is a single pass over the handful of active lights.
+    csq_torch_timer--;
+    if (csq_torch_timer > 0) return false;
+    csq_torch_timer = 30;
+
+    // Find the light that belongs to this companion. with() only walks *active*
+    // instances, which is exactly the test wanted: a stranded deactivated torch is
+    // frozen at a doorway and can never follow this companion again, so for the
+    // purposes of "does this companion have a light" it does not count.
+    //
+    // The duplicate branch is the other half of that. If the player later walks
+    // back past the doorway, instance_activate_region wakes the stranded torch, it
+    // sees its owner exists again and snaps onto the companion -- which by then
+    // already has a replacement, so the companion would glow at double brightness
+    // for the rest of the raid. Keeping the first and destroying the rest collapses
+    // that back to one light within half a second of it happening.
+    var _my_id = id;
+    var _mine  = noone;
+
+    with (obj_light_enemy_torch)
+    {
+        if (id_linked == _my_id)
+        {
+            if (_mine == noone) _mine = id;
+            else                instance_destroy();
+        }
+    }
+
+    if (_mine != noone) return false;
+
+    // Same two lines as obj_npc_human_parent_Create_0. The torch's own Create sets
+    // alarm[10] = 1, which flips start_checking on a frame later and caches
+    // light_standard, so a light built this way behaves identically to one built at
+    // NPC spawn -- there is no extra state to restore.
+    try
+    {
+        var _ll = instance_create_depth(x, y, 0, obj_light_enemy_torch);
+        _ll.id_linked = _my_id;
+    }
+    catch (_err)
+    {
+        csq_log_exception("csq_ai_torch_ensure", _err);
+        return false;
+    }
+
+    csq_log_debug("companion: relit flashlight for '" + string(npc_name) + "'");
+    return true;
 }
 
 

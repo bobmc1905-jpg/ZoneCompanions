@@ -7,6 +7,46 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.1.1] — 2026-08-25
+
+Two fixes to things the base game only ever set up once, at NPC spawn, and never
+checked again.
+
+### Fixed
+
+- **A companion's flashlight went out when you walked into or out of a building,
+  and never came back on.** A doorway teleports *you* to the paired interior marker
+  somewhere else in the room, so the companion is left standing outside the 960×540
+  region `obj_controller` keeps activated and is deactivated within 20 frames. Its
+  light either destroys itself — `obj_light_enemy_torch` runs `instance_destroy()`
+  when `instance_exists(id_linked)` fails, and a deactivated instance reports as
+  non-existent — or is culled in the same sweep and stranded at the doorway. The
+  companion is recovered and teleported to you; the light was not, and the base game
+  creates a torch in exactly one place, at NPC creation. Companions now check every
+  30 frames that they still own a light and re-create it if not, mirroring the
+  presence check the base game already runs on an NPC's weapon. A stranded torch
+  that wakes up later and re-attaches is destroyed as a duplicate, so a companion
+  cannot end up lit twice over.
+- **Companions had to reload before they could return fire on first contact.** Every
+  NPC is created with `have_to_reload = true`, which the state machine turns into a
+  reload action — `path_end()` and 1.3 to 3 seconds of standing still — the moment it
+  acquires a target. The magazine was already full: `npc_setup_weapon` fills it at
+  spawn. The flag is now cleared right after the weapon is set up, so a companion you
+  hired and walked into the zone with shoots back immediately. Reloads from a
+  genuinely empty magazine are untouched.
+- **Companions offered a "press F to talk" prompt in raid.** `npc_setup` copies the
+  preset's `speaker_id` onto the instance, and `loner_regular` carries `"guy"` — the
+  generic wandering-loner speaker, with real dialogue behind it. That is all
+  `player_collect_nearby_interactables` needs, so standing next to your own companion
+  put a talk prompt on screen, served up a stranger's small talk, and competed with
+  the loot container you were actually trying to open. Companions now keep the
+  `"no_speaker"` value the base game gives every NPC before setup overwrites it, which
+  also stops a companion ever being wired up as a quest giver. The recruiter pins the
+  same value, so a `recruiter_preset` pointed at a talking preset cannot end up with
+  two prompts on one key.
+
+---
+
 ## [1.1.0] — 2026-08-25
 
 Companions are now hired from an NPC for money instead of appearing on a key press,
@@ -173,5 +213,6 @@ Initial public release.
   calls into object events, and two guards prepended to the bullet-collision
   predicates. Nothing else in the game is modified.
 
+[1.1.1]: https://github.com/bobmc1905-jpg/ZoneCompanions/releases/tag/v1.1.1
 [1.1.0]: https://github.com/bobmc1905-jpg/ZoneCompanions/releases/tag/v1.1.0
 [1.0.0]: https://github.com/bobmc1905-jpg/ZoneCompanions/releases/tag/v1.0

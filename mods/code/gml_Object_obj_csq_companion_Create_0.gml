@@ -21,6 +21,14 @@
 //                          from the preset -- so it must come before anything
 //                          that overrides those.
 //    npc_setup_weapon()    gives the companion a gun to actually fight with.
+//    have_to_reload = false
+//                          cancels the one forced reload vanilla schedules for every
+//                          freshly created NPC. Directly after npc_setup_weapon,
+//                          which is what filled the magazine the flag claims is
+//                          empty.
+//    npc_speaker_id = "no_speaker"
+//                          takes the talk prompt off the companion. After npc_setup,
+//                          which is what put a real speaker on it.
 //    npc_name = roster name
 //                          overwrites the random name npc_setup drew at its line 8,
 //                          so the panel and the game agree on who this is. After
@@ -77,6 +85,48 @@ if (is_undefined(_csq_preset) || string(_csq_preset) == "")
 
 npc_setup(_csq_preset);
 npc_setup_weapon();
+
+// The companion walks out of the hub with a round already chambered.
+//
+// obj_npc_parent_Create_0 line 279 sets have_to_reload = true for every NPC in the
+// game, and obj_npc_parent_Step_0 turns that flag into a reload *action* the moment
+// the NPC acquires a target (lines 1463 and 1647): reloading = true, path_end(),
+// alarm[0] = irandom(100) + 80. That is 1.3 to 3 seconds of standing still and not
+// firing, spent at the exact moment first contact happens -- which is what "their
+// weapons are not reloaded after spawn, so entering combat they need to reload
+// first" is.
+//
+// Nothing is actually empty. npc_setup_weapon, one line above, has just filled the
+// magazine (ammo_now = the weapon's magazine size, modded size included). The flag
+// is vanilla's way of making an ambient enemy rack the bolt the first time it sees
+// you; a companion you hired, armed and walked into the zone with has had all the
+// time in the world to do that already.
+//
+// Only the *initial* flag is cleared. scr_enemy_shoot line 42 still sets it when the
+// magazine genuinely runs dry, so mid-fight reloads behave exactly as vanilla.
+have_to_reload = false;
+
+// A companion is not someone you strike up a conversation with.
+//
+// npc_setup line 9 does
+//     npc_speaker_id = npc_get_speaker_id(npc_id, true);
+// and loner_regular's gamedata entry carries "speaker_id" : "guy" -- the generic
+// wandering-loner speaker, with real dialogue content behind it. That is all
+// player_collect_nearby_interactables needs to offer the talk interaction:
+//     if (npc_speaker_id != "no_speaker" && npc_dialogue_has_content(id))
+//         if (faction_get_rep_temp(_faction, faction) >= 0)
+// Both tests pass for a companion -- the rep test passes for practically anyone,
+// since 0 is already the floor -- so standing within 16px of your own companion put
+// a "press F to talk" prompt on screen and offered up a stranger's small talk, plus
+// whatever heal and repair prompts that speaker has.
+//
+// Restoring the value obj_npc_parent_Create_0 line 27 sets for every NPC in the
+// game is the cleanest way out: the first test short-circuits, no dialogue lookup
+// happens at all, and the companion stops competing with the chest you were
+// actually trying to open. "no_speaker" is speaker index 0 in speaker.json, so
+// alarm[10]'s is_a_quest_giver lookup three frames from now reads exactly what a
+// bandit's does -- and cannot hand a companion a quest line.
+npc_speaker_id = "no_speaker";
 
 // npc_setup line 8 has just overwritten npc_name with a fresh draw of its own:
 //     npc_name = npc_generate_name(npc_id);

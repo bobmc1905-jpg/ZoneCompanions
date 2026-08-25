@@ -18,11 +18,18 @@
 //  already being torn down -- reading a deleted path and writing to a destroyed
 //  instance. Testing hp > 0 catches it precisely, because the vanilla code has
 //  just stamped -100 over it.
+//
+//  csq_ai_torch_ensure() runs alongside csq_ai_step(), not inside it: csq_ai_step
+//  returns early when the player cannot be read, and the flashlight still wants
+//  checking on those frames. Light first, brain second -- the light copies the
+//  companion's position in its own Step, so a light created before the movement
+//  code runs is never a frame behind.
 // =============================================================================
 
 event_inherited();
 
 if (hp > 0)
 {
+    csq_ai_torch_ensure();
     csq_ai_step();
 }
