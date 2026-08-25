@@ -174,4 +174,4 @@ Initial public release.
   predicates. Nothing else in the game is modified.
 
 [1.1.0]: https://github.com/bobmc1905-jpg/ZoneCompanions/releases/tag/v1.1.0
-[1.0.0]: https://github.com/bobmc1905-jpg/ZoneCompanions/releases/tag/v1.0.0
+[1.0.0]: https://github.com/bobmc1905-jpg/ZoneCompanions/releases/tag/v1.0
