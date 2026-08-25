@@ -1,6 +1,14 @@
 # Zone Companions
 
+*Don't walk the Zone alone.*
+
 ---
+
+<!--
+  README-NEXUS.txt is this file's twin: the same sections, claims and numbers, in
+  BBCode for the Nexus Mods description box. The only content it leaves out is the
+  AI note and the referral link immediately below. Change one, change the other.
+-->
 
 > [!NOTE]
 > **🤖 Fully vibe-coded.** This mod was built entirely with Claude Opus 5, using
@@ -27,12 +35,43 @@ Version **1.1.1** · MIT licensed · Source and full docs:
 
 ---
 
+## What your squad does
+
+- **Fights with the game's real AI** — cover, flanking, reloading, target
+  selection. Not approximated. This mod contains no combat code at all.
+- **Paths properly** — they route around buildings and terrain on the game's own
+  A\* navigation grid instead of grinding into walls.
+- **Sees for you** — enemies, loot containers and the companions themselves are
+  drawn when a companion can see them, even when you cannot, and each companion's
+  view cone clears the fog of war exactly like your own.
+- **Holds a formation that covers where you are looking** — they sit behind your
+  heading, out of your line of fire, but slide toward your cursor so they screen
+  the direction you are actually watching.
+- **Keeps up with you** — follow speed is derived from your *live* current speed,
+  so backpacks, hunter skills and the hub's run bonus cannot leave them trailing.
+- **Patches you up** — a companion breaks off to heal you when you are hurt, and
+  abandons a firefight to reach you when you are critical. Exactly one claims each
+  wound, so the whole squad does not drop formation for the same injury. Charges
+  refill every raid.
+- **Will not shoot you, and you will not shoot them** — protection runs both ways,
+  enforced inside the game's own bullet-collision checks, so a blocked round is
+  not wasted and can still hit the enemy behind it.
+- **Belongs to your character** — the roster is saved in that character's save
+  slot, carries injuries between raids, and is deleted with the save.
+- **Behaves naturally when idle** — they drift around their position while you
+  stand still, and snap back into formation the moment you move.
+- **Tells you what is going on** — a squad panel shows each companion's name,
+  health, remaining field dressings and current mode.
+
+---
+
 ## Requirements
 
 | | |
 |---|---|
 | **ZERO Sievert** | tested against **1.2.92** |
 | **GMLoader** | tested against **build 34** |
+| **Other mods** | none required |
 | **Backup** | GMLoader makes a `backup.win` for you — keep your own copy of `data.win` too |
 
 > **This is not a Steam Workshop mod.** GMLoader patches `data.win` directly,
@@ -278,6 +317,26 @@ first.
 
 ---
 
+## Compatibility
+
+- **Saves:** safe to add to an existing character, and safe to remove. Roster data
+  lives in its own section of the save that the base game never reads, so leftovers
+  after uninstalling are harmless.
+- **Other GMLoader mods:** should coexist. Everything the mod adds lives in its own
+  uniquely-prefixed scripts and its own new objects, and it touches base-game code
+  in only nine places. The two worth knowing about are the bullet-collision
+  predicates `bullet_can_collide_with_player` and `bullet_can_collide_with_npc` —
+  another mod that rewrites those specific functions could conflict. Each patch is
+  applied independently, so a clash disables that one patch and logs a warning
+  rather than breaking the build.
+- **Steam Workshop mods:** the Workshop mod system and GMLoader work differently
+  and do not know about each other. Running both is generally fine, but a Workshop
+  companion or follower mod alongside this one is asking for trouble.
+- **Not compatible with:** any mod that also replaces those two bullet-collision
+  predicates.
+
+---
+
 ## Known issues
 
 - **Not Steam Workshop distributable.** GMLoader rewrites `data.win`. That is
@@ -318,18 +377,40 @@ base game never reads.
 
 ---
 
-## Credits and licence
+## Permissions
 
-Made by **Bobby**.
+Released under the **MIT Licence** — see [LICENSE](LICENSE). The list below simply
+restates it in the terms mod sites ask for. In short: do what you like with it,
+just credit the original and link back.
 
-Built on [GMLoader](https://github.com/Senjay-id/GMLoader) by Senjay-id, without
-which none of this would be possible. GMLoader in turn recompiles `data.win`
-using [UndertaleModTool](https://github.com/UnderminersTeam/UndertaleModTool) by
-the Underminers team. Thanks to the ZERO Sievert modding community for mapping
-out the game's internals.
+- **Use it in your own mods:** yes. Take the code, the approach, whole modules,
+  whatever is useful.
+- **Modify and re-upload:** yes, anywhere, including Nexus Mods — credit the
+  original and link back to this repository or the Nexus page.
+- **Fix it or update it for a newer game version:** yes, and you do not need to ask
+  first. If I have gone quiet and the mod is broken, please do.
+- **Translate it:** yes, with credit.
+- **Include it in a modpack or compilation:** yes, with credit.
+- **Convert it to another game or another loader:** yes, with credit.
+- **Credit required:** yes, in all of the above. Name the original mod and link
+  back — that is the only condition.
 
-Released under the **MIT Licence** — see [LICENSE](LICENSE). You may reuse, fork
-and redistribute this, including in your own mods, as long as you credit the
-original and link back.
+Only ask that you do not present it as your own original work, and that if you fork
+it publicly you keep the MIT licence notice with it.
+
+---
+
+## Credits
+
+- **Bobby** — mod author
+- **Senjay-id** — [GMLoader](https://github.com/Senjay-id/GMLoader), without which
+  this mod could not exist
+- **The Underminers team** —
+  [UndertaleModTool](https://github.com/UnderminersTeam/UndertaleModTool), which
+  GMLoader uses to recompile the game
+- **The ZERO Sievert modding community** — for mapping out the game's internals
+- **CABO Studio** — for ZERO Sievert itself, published by Modern Wolf
 
 Changes in each release are listed in [CHANGELOG.md](CHANGELOG.md).
+
+*Released under the MIT Licence — © 2026 Bobby*

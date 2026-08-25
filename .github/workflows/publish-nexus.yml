@@ -22,9 +22,11 @@
 #  Until 2 and 3 are present the job skips with a notice rather than failing, so
 #  this can sit in the repo before the Nexus page is ready.
 #
-#  The file description and the changelog entry are lifted verbatim from the
-#  VERSION block in CHANGELOG-NEXUS.txt, which is already written in plain
-#  language for Nexus readers rather than in Markdown for GitHub.
+#  The file description and the changelog entry are both taken from the release's
+#  own section of CHANGELOG.md, which is the single changelog this project keeps.
+#  Because that file is Markdown for GitHub and Nexus renders neither Markdown nor
+#  its 80-column hard wrapping, the notes step below unwraps it and strips the
+#  markup before sending it.
 # =============================================================================
 
 name: Publish to Nexus Mods
@@ -93,18 +95,67 @@ jobs:
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Lift the release notes out of CHANGELOG-NEXUS.txt
+      - name: Lift the release notes out of CHANGELOG.md
         id: notes
         if: ${{ steps.cfg.outputs.configured == 'true' }}
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
         run: |
           set -euo pipefail
-          BLOCK="$(awk -v v="VERSION ${{ steps.ver.outputs.version }}" '
-            $0 == v      { grab = 1; next }
-            grab && /^VERSION / { exit }
-            grab         { print }
-          ' CHANGELOG-NEXUS.txt | python3 -c 'import sys; print(sys.stdin.read().strip())')"
+          BLOCK="$(python3 - "$VERSION" <<'PY'
+          import re, sys
+
+          ver = sys.argv[1]
+          lines = open("CHANGELOG.md", encoding="utf-8").read().splitlines()
+
+          start = None
+          for i, ln in enumerate(lines):
+              if ln.startswith("## [" + ver + "]"):
+                  start = i + 1
+                  break
+          if start is None:
+              sys.exit(0)          # no such release -> empty output -> warning below
+
+          # Pass 1: take the section, drop horizontal rules and link definitions, and
+          # unwrap the hard-wrapped Markdown so every bullet or paragraph is one line.
+          # Nexus renders newlines literally, so leaving the 80-column wrapping in
+          # would ragged-edge the whole description.
+          rows = []
+          for ln in lines[start:]:
+              if ln.startswith("## "):
+                  break
+              ln = ln.rstrip()
+              if ln.strip() in ("", "---") or re.match(r"^\[[^\]]+\]:\s", ln):
+                  if rows and rows[-1] != "":
+                      rows.append("")
+                  continue
+              if ln.startswith("#"):
+                  rows.append(ln.lstrip("# ").strip())
+                  continue
+              stripped = ln.lstrip()
+              indent = len(ln) - len(stripped)
+              if stripped.startswith("- "):
+                  rows.append(" " * indent + stripped)
+              elif rows and rows[-1] != "":
+                  rows[-1] = rows[-1].rstrip() + " " + stripped
+              else:
+                  rows.append(stripped)
+
+          # Pass 2: strip the Markdown, now that no construct spans a line break.
+          def demd(s):
+              s = s.replace("\\*", "\0")                                  # A\* -> A*
+              s = re.sub(r"`([^`]*)`", r"\1", s)
+              s = re.sub(r"\*\*([^*]+)\*\*", r"\1", s)
+              s = re.sub(r"\[([^\]]+)\]\((https?://[^)]+)\)", r"\1 (\2)", s)
+              s = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", s)
+              s = re.sub(r"\*([^*]+)\*", r"\1", s)
+              return s.replace("\0", "*")
+
+          print("\n".join(demd(r) for r in rows).strip())
+          PY
+          )"
           if [ -z "$BLOCK" ]; then
-            echo "::warning::no 'VERSION ${{ steps.ver.outputs.version }}' block in CHANGELOG-NEXUS.txt -- uploading without a description"
+            echo "::warning::no '## [$VERSION]' section in CHANGELOG.md -- uploading without a description"
           fi
           {
             echo "text<<CSQ_NOTES_EOF"

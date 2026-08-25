@@ -5,6 +5,11 @@ All notable changes to Zone Companions are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+This is the only changelog. The Nexus Mods release notes are generated from the
+section below that matches the version being published — unwrapped, with the
+Markdown stripped — so each entry is written to read as prose on a mod page, not
+just as a diff summary.
+
 ---
 
 ## [1.1.1] — 2026-08-25
