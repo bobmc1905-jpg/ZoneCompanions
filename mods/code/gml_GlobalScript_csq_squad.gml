@@ -62,6 +62,15 @@ function csq_squad_init()
         global.csq_pending_name = undefined;
     }
 
+    // Per-companion HP multiplier handed to the Create event the same way the
+    // preset and name are (see the header). -1 means "no override, use the
+    // configured hp_multiplier", which is what a legacy roster or a debug-spawn
+    // recruit supplies.
+    if (!variable_global_exists("csq_pending_hp_mult"))
+    {
+        global.csq_pending_hp_mult = -1;
+    }
+
     if (!variable_global_exists("csq_squad_hold"))
     {
         global.csq_squad_hold = false;
@@ -137,13 +146,16 @@ function csq_squad_find_by_inst(_inst)
 }
 
 
-/// @func   csq_squad_make_entry(_preset, _name, _hp)
+/// @func   csq_squad_make_entry(_preset, _name, _hp, _hp_mult)
 /// @desc   A roster record. hp of -1 means "undamaged", resolved at spawn time
-///         from the preset's own max HP.
-function csq_squad_make_entry(_preset, _name, _hp)
+///         from the preset's own max HP. hp_mult of -1 (or omitted) means "use
+///         the configured hp_multiplier"; a tier recruit passes its own value so
+///         a Veteran is tougher than a Rookie even when they share a preset.
+function csq_squad_make_entry(_preset, _name, _hp, _hp_mult)
 {
-    if (is_undefined(_preset) || string(_preset) == "") _preset = csq_cfg("default_preset");
-    if (is_undefined(_hp))                              _hp     = -1;
+    if (is_undefined(_preset) || string(_preset) == "") _preset  = csq_cfg("default_preset");
+    if (is_undefined(_hp))                              _hp      = -1;
+    if (is_undefined(_hp_mult))                         _hp_mult = -1;
 
     if (is_undefined(_name) || string(_name) == "")
     {
@@ -155,9 +167,14 @@ function csq_squad_make_entry(_preset, _name, _hp)
     }
 
     return {
-        preset: string(_preset),
-        name:   string(_name),
-        hp:     _hp,
+        preset:  string(_preset),
+        name:    string(_name),
+        hp:      _hp,
+
+        // Toughness override for this companion. Flows to the Create event via
+        // global.csq_pending_hp_mult at spawn; -1 falls back to hp_multiplier.
+        hp_mult: _hp_mult,
+
         inst:   noone,
 
         // Set only by csq_squad_notify_cleanup, and only on a confirmed death.
@@ -284,13 +301,15 @@ function csq_squad_spawn_entry(_entry, _slot)
         }
 
         // Hand the preset and the roster's name to the Create event (see header).
-        global.csq_pending_preset = _entry.preset;
-        global.csq_pending_name   = _entry.name;
+        global.csq_pending_preset  = _entry.preset;
+        global.csq_pending_name    = _entry.name;
+        global.csq_pending_hp_mult = csq_struct_get(_entry, "hp_mult", -1);
 
         var _inst = instance_create_depth(_pos.x, _pos.y, 0, obj_csq_companion);
 
-        global.csq_pending_preset = undefined;
-        global.csq_pending_name   = undefined;
+        global.csq_pending_preset  = undefined;
+        global.csq_pending_name    = undefined;
+        global.csq_pending_hp_mult = -1;
 
         if (!instance_exists(_inst))
         {
@@ -318,20 +337,25 @@ function csq_squad_spawn_entry(_entry, _slot)
     }
     catch (_err)
     {
-        global.csq_pending_preset = undefined;
-        global.csq_pending_name   = undefined;
+        global.csq_pending_preset  = undefined;
+        global.csq_pending_name    = undefined;
+        global.csq_pending_hp_mult = -1;
         csq_log_exception("csq_squad_spawn_entry", _err);
         return noone;
     }
 }
 
 
-/// @func   csq_squad_recruit(_preset)
+/// @func   csq_squad_recruit(_preset, _hp_mult)
 /// @desc   Add a companion to the roster and spawn it if we are in a raid.
+///         _hp_mult is optional: omit it (or pass -1) for the configured
+///         hp_multiplier, or pass a tier's value for a paid recruit.
 /// @return {Bool} success
-function csq_squad_recruit(_preset)
+function csq_squad_recruit(_preset, _hp_mult)
 {
     csq_squad_init();
+
+    if (is_undefined(_hp_mult)) _hp_mult = -1;
 
     if (csq_squad_is_full())
     {
@@ -339,7 +363,7 @@ function csq_squad_recruit(_preset)
         return false;
     }
 
-    var _entry = csq_squad_make_entry(_preset, undefined, -1);
+    var _entry = csq_squad_make_entry(_preset, undefined, -1, _hp_mult);
     array_push(global.csq_squad, _entry);
 
     var _slot = array_length(global.csq_squad) - 1;

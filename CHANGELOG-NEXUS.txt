@@ -1,0 +1,67 @@
+Zone Companions - Changelog
+Short version. The full, technical changelog is CHANGELOG.md.
+
+
+VERSION 1.1.0
+
+New: Hire companions from an NPC for money
+- A hireable-labour contact now stands in the hub bar.
+- Walk up to him and press F (the normal Interact key) to open the hire menu.
+- Three tiers: Rookie 2,500 - Veteran 6,000 - Elite 12,000 roubles.
+- Higher tiers really are tougher, not just more expensive.
+- W/S to choose, Enter to buy, Backspace to close.
+
+New: Your companions' eyes now actually work
+- Enemies, loot containers and the companions themselves are visible when a
+  companion can see them, even if you cannot.
+- Each companion's view cone clears the fog of war, exactly like your own.
+- Companion flashlights are now visible outside your own view cone.
+- No coloured overlays or boxes - the map simply opens up where your squad is
+  looking.
+- Optional map pins for companions who are off-screen or behind fog (off by
+  default).
+
+New: The config finally updates itself
+- There are now two files. csq_config.ini is a generated reference listing every
+  setting with its default and a description - it is rewritten every launch, so
+  a mod update's new settings always show up in it.
+- csq_config_user.ini is yours. Put only the lines you want to change in it. The
+  mod never overwrites it.
+- Nothing to do when you update: your old settings are moved into the new user
+  file for you on the first launch.
+- Edit the wrong file by mistake and the mod moves your changes across for you
+  and tells you in the log. Nothing is lost.
+
+Changed
+- F now opens the recruiter menu. Free debug spawning moved to F6 and only
+  works with debug mode switched on.
+- 97 settings across 11 sections, up from 61 across 9. Nothing was removed.
+
+Fixed
+- Companions were invisible whenever they left your own view cone.
+- Companion flashlights produced no light out of your sight.
+- Loot containers next to a companion stayed hidden.
+
+Known issue
+- Wall shadows inside ground a companion revealed are still drawn relative to
+  your position, not theirs. The ground is revealed correctly; only the
+  direction the shadows fall is wrong.
+
+Upgrading from 1.0.0
+- Nothing to do. Your existing settings are carried over automatically and your
+  saves are unaffected.
+
+
+VERSION 1.0.0
+
+First release.
+- Up to 3 persistent companions, saved with your character.
+- Real vanilla combat AI and real pathfinding - they take cover, flank, shoot
+  and reload, and route around buildings.
+- Formation following that keeps up with your actual speed, and idle roaming.
+- Field medic: a companion breaks off to patch you up, and drops everything to
+  reach you when you are badly hurt.
+- Two-way friendly fire protection.
+- Squad panel with names, HP, field dressings and current mode.
+- Injuries carry from one raid to the next.
+- 61 settings in a fully commented config file, plus logging for bug reports.

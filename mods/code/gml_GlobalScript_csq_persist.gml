@@ -143,7 +143,7 @@ function csq_persist_probe()
 /// @desc   Reduce the roster to plain data. Live instance ids are deliberately
 ///         dropped -- they are meaningless in the next session, and JSON cannot
 ///         represent them anyway.
-/// @return {Array} array of {preset, name, hp}
+/// @return {Array} array of {preset, name, hp, hp_mult}
 function csq_persist_serialise()
 {
     csq_squad_init();
@@ -160,9 +160,14 @@ function csq_persist_serialise()
         if (csq_alive(_entry.inst)) _hp = _entry.inst.hp;
 
         array_push(_out, {
-            preset: string(_entry.preset),
-            name:   string(_entry.name),
-            hp:     _hp
+            preset:  string(_entry.preset),
+            name:    string(_entry.name),
+            hp:      _hp,
+
+            // Carry the tier toughness so a Veteran reloaded from a save is still a
+            // Veteran. -1 for a legacy entry that predates tiers, which loads back
+            // to the configured hp_multiplier.
+            hp_mult: csq_struct_get(_entry, "hp_mult", -1)
         });
     }
 
@@ -218,7 +223,12 @@ function csq_persist_deserialise(_data)
 
         if (!is_numeric(_hp)) _hp = -1;
 
-        array_push(_restored, csq_squad_make_entry(_preset, _name, _hp));
+        // hp_mult is absent from saves written before tiers existed; -1 restores
+        // those to the configured hp_multiplier, exactly as they behaved before.
+        var _hp_mult = csq_struct_get(_record, "hp_mult", -1);
+        if (!is_numeric(_hp_mult)) _hp_mult = -1;
+
+        array_push(_restored, csq_squad_make_entry(_preset, _name, _hp, _hp_mult));
     }
 
     global.csq_squad = _restored;

@@ -1,9 +1,10 @@
 // =============================================================================
 //  Zone Companions  -  csq_init
 // -----------------------------------------------------------------------------
-//  The mod's entry points. Every patch this mod applies to a vanilla object event
-//  calls exactly one function in this file and nothing else, so the complete list
-//  of things the mod does to the base game is the five functions below.
+//  The mod's lifecycle entry points. Five of the mod's nine code patches append a
+//  single call to a vanilla object event, and each of those five calls exactly one
+//  function in this file and nothing else -- so the mod's whole lifecycle is the
+//  five functions below.
 //
 //  LIFECYCLE
 //    csq_boot()          obj_cursor_Create_0        once, on the logo screen
@@ -14,6 +15,14 @@
 //
 //  Those five events are the ones the GMLoader ZERO Sievert guide documents as
 //  mod entry points, which is why they were chosen over any others.
+//
+//  THE OTHER FOUR PATCHES ARE NOT LIFECYCLE AND ARE NOT ROUTED THROUGH HERE
+//  They are guards and hooks prepended inside a specific vanilla function, where
+//  the only sensible caller is that function: two in the bullet-collision
+//  predicates (csq_ff), one in player_line_of_sight and one part-way through
+//  obj_fog_setup_Draw_0 (both csq_reveal). Each documents its own preconditions at
+//  the definition. See mods/config/code_patch/10_zone_companions.yaml for the
+//  complete list.
 //
 //  WHY SPAWNING IS DEFERRED OUT OF THE MAP-LOAD EVENT
 //  obj_controller_Create_0 fires before the map generator has finished, so
@@ -38,7 +47,7 @@
 /// @func   csq_mod_name()
 /// @desc   Identity, reported in the log header and on error.
 function csq_mod_name()    { return "Zone Companions"; }
-function csq_mod_version() { return "1.0.0"; }
+function csq_mod_version() { return "1.1.0"; }
 
 
 /// @func   csq_boot()
@@ -95,7 +104,8 @@ function csq_boot()
                      ", dismiss " + string(csq_input_key("key_dismiss")) +
                      ", hold "    + string(csq_input_key("key_toggle_hold")) +
                      ", panel "   + string(csq_input_key("key_toggle_hud")) +
-                     ", dump "    + string(csq_input_key("key_debug_dump")));
+                     ", dump "    + string(csq_input_key("key_debug_dump")) +
+                     ", debug spawn " + string(csq_input_key("key_debug_spawn")));
 
         return true;
     }
@@ -279,6 +289,17 @@ function csq_tick()
 
         csq_tick_refill_heal_charges();
         csq_tick_deferred_spawn();
+
+        // Recruiter NPC: (re)place it in the hub, watch the player's distance to
+        // it, and drive the hire menu. Self-contained in csq_recruit; a no-op when
+        // the feature is disabled or we are not in the hub.
+        csq_recruit_tick();
+
+        // Last, and after prune, so the sight cache only ever holds companions that
+        // were live this frame. Everything that asks "can my squad see this point"
+        // -- vanilla's NPC and chest visibility fades, and the fog subtract in
+        // obj_fog_setup's Draw event -- reads what this builds.
+        csq_reveal_sight_cache();
     }
     catch (_err)
     {

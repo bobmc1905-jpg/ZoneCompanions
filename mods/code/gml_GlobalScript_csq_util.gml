@@ -288,3 +288,41 @@ function csq_clamp_int(_value, _min, _max)
 {
     return floor(clamp(_value, _min, _max));
 }
+
+
+/// @func   csq_world_to_gui(_wx, _wy)
+/// @desc   Room coordinates to the 480x270 GUI space every draw in this mod uses.
+///         Returns { ok, x, y }; ok is false only when the camera is unreadable,
+///         in which case the caller must not draw at all rather than draw at 0,0.
+///
+///         The result is deliberately NOT clamped to the screen. Off-screen values
+///         are meaningful to callers: a view cone has vertices well outside the
+///         view, and the companion markers need the true position to work out which
+///         edge to pin an arrow to.
+///
+///         Vanilla's own marker code (obj_controller_Draw_64 line 868) just writes
+///         `npc_x - camx`, taking it for granted that the camera view is exactly
+///         480x270. That holds today. Scaling by the real view size instead costs
+///         two divisions and is identical whenever the assumption is true.
+function csq_world_to_gui(_wx, _wy)
+{
+    try
+    {
+        var _cam = view_camera[0];
+
+        var _cw = camera_get_view_width(_cam);
+        var _ch = camera_get_view_height(_cam);
+
+        if (_cw <= 0 || _ch <= 0) return { ok: false, x: 0, y: 0 };
+
+        return {
+            ok: true,
+            x: (_wx - camera_get_view_x(_cam)) * (480 / _cw),
+            y: (_wy - camera_get_view_y(_cam)) * (270 / _ch)
+        };
+    }
+    catch (_err)
+    {
+        return { ok: false, x: 0, y: 0 };
+    }
+}

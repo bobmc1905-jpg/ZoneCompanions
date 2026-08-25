@@ -1,7 +1,9 @@
 // =============================================================================
 //  Zone Companions  -  csq_hud
 // -----------------------------------------------------------------------------
-//  Draws the squad list, and the optional debug overlay.
+//  Draws the squad list and the optional debug overlay. csq_hud_draw is also the
+//  mod's single Draw GUI entry point, so it calls csq_recruit_draw and
+//  csq_reveal_draw on the way through -- see the note on it below.
 //
 //  COORDINATE SPACE IS 480x270
 //  obj_controller_Draw_64 opens with display_set_gui_size(480, 270). It briefly
@@ -36,6 +38,28 @@ function csq_hud_colour_ok()      { return 16777215; }   // white
 function csq_hud_colour_hurt()    { return 8454143;  }   // pale red
 function csq_hud_colour_absent()  { return 8421504;  }   // grey
 function csq_hud_colour_outline() { return 0;        }   // black
+
+/// @func   csq_hud_colour_interact()
+/// @desc   The colour vanilla uses for the interaction prompt you are actually
+///         about to trigger. obj_controller_Draw_64 line 519 starts every entry in
+///         global.list_interact at 16777215 and line 523 recolours the selected one
+///         to this, which is also the tint of the s_hud_selector arrow beside it
+///         (#FFF291). BGR 9564927 is RGB(255, 234, 145) -- a warm cream.
+function csq_hud_colour_interact() { return 9564927; }   // pale gold
+
+/// @func   csq_hud_colour_reveal()
+/// @desc   The colour of the optional companion position pins.
+///
+///         White, the same as vanilla's own NPC markers at
+///         obj_controller_Draw_64 line 822 onward. An earlier build tinted these
+///         green to mark them as "mine"; the squad's vision is now shown by
+///         clearing the fog rather than by painting coloured shapes over it, so
+///         there is no longer any coloured overlay for a pin to match, and a pin
+///         that looks like the game's own pins is the least intrusive option.
+function csq_hud_colour_reveal()
+{
+    return 16777215;   // white
+}
 
 
 /// @func   csq_hud_max_hp(_inst)
@@ -222,9 +246,9 @@ function csq_hud_debug_text(_entry)
 ///
 ///         The runtime flag is defaulted lazily here rather than in csq_boot, so
 ///         there is no boot-order dependency -- the same idiom csq_squad_init
-///         uses. It is deliberately NOT saved to the ini: the config file is only
-///         ever written when it is missing, so persisting the flag would mean
-///         rewriting the player's own file behind their back. The panel is
+///         uses. It is deliberately NOT persisted: it is a runtime toggle, not a
+///         setting, and the mod never writes to csq_config_user.ini, so saving it
+///         would mean editing the player's own file behind their back. The panel is
 ///         therefore shown again on every launch.
 function csq_hud_visible()
 {
@@ -263,13 +287,27 @@ function csq_hud_toggle()
 
 
 /// @func   csq_hud_draw()
-/// @desc   Render the squad panel. Called from appended code at the end of
-///         obj_controller_Draw_64. Never throws: a HUD problem must not take the
-///         whole draw event down, because obj_controller draws the real UI.
+/// @desc   The mod's only Draw GUI entry point, appended to the end of
+///         obj_controller_Draw_64. Renders the squad panel, and first hands over to
+///         csq_recruit_draw and csq_reveal_draw, both of which have to work when the
+///         panel itself is hidden or the roster is empty.
+///
+///         Never throws: a HUD problem must not take the whole draw event down,
+///         because obj_controller draws the real UI.
 function csq_hud_draw()
 {
     try
     {
+        // The recruiter prompt and hire menu draw independently of the squad panel
+        // -- they must show even with an empty roster, and while the panel is
+        // toggled off -- so they run before the panel's own early-outs below.
+        // csq_recruit_draw guards itself and never throws.
+        csq_recruit_draw();
+
+        // Same reasoning: "where is my companion" has to answer itself with the
+        // panel hidden, and it is the one overlay that must survive fog of war.
+        csq_reveal_draw();
+
         if (!csq_hud_visible())      return;
         if (csq_squad_count() == 0)  return;
 

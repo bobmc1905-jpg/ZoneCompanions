@@ -12,17 +12,18 @@
 
 ---
 
-**A squad of NPC companions for ZERO Sievert.** They spawn beside you at the
-start of every raid, follow you in formation, fight what you fight, patch you up
-when you are hurt, and carry their injuries between raids.
+**A squad of NPC companions for ZERO Sievert.** Hire them from a contact in the
+hub bar, and they spawn beside you at the start of every raid, follow you in
+formation, fight what you fight, patch you up when you are hurt, scout ahead with
+their own working eyes, and carry their injuries between raids.
 
 Because this is a GMLoader mod, companions run the game's *own* NPC brain — the
 same utility AI that makes bandits take cover, flank and reload, and the same
 `mp_grid` A\* pathfinding the base game uses. Nothing about their combat is
 re-implemented or faked.
 
-Version **1.0.0** · MIT licensed · Source and full docs:
-<https://github.com/bobmc1905-jpg/zone-companions>
+Version **1.1.0** · MIT licensed · Source and full docs:
+<https://github.com/bobmc1905-jpg/ZoneCompanions>
 
 ---
 
@@ -57,14 +58,16 @@ Version **1.0.0** · MIT licensed · Source and full docs:
    are merging, not replacing:
 
    ```
-   <game folder>/mods/code/gml_GlobalScript_csq_*.gml          (11 files)
-   <game folder>/mods/code/gml_Object_obj_csq_companion_*.gml  (3 files)
+   <game folder>/mods/code/gml_GlobalScript_csq_*.gml           (13 files)
+   <game folder>/mods/code/gml_Object_obj_csq_companion_*.gml   (3 files)
+   <game folder>/mods/code/gml_Object_obj_csq_recruiter_*.gml   (2 files)
    <game folder>/mods/config/new_object/obj_csq_companion.json
+   <game folder>/mods/config/new_object/obj_csq_recruiter.json
    <game folder>/mods/config/code_patch/10_zone_companions.yaml
    ```
 
    Those three destinations are `GMLCodeDirectory`, `NewObjectDirectory` and
-   `GMLCodePatchDirectory` in `GMLoader.ini`. 16 files in total.
+   `GMLCodePatchDirectory` in `GMLoader.ini`. 21 files in total.
 
 3. **Run GMLoader** from the game folder. It wants a real console window, so if
    you launch it from a script rather than by double-clicking:
@@ -76,8 +79,9 @@ Version **1.0.0** · MIT licensed · Source and full docs:
 4. **Check `GMLoader.log`** for a successful save and no errors. If it stopped on
    a hash mismatch, see [below](#if-gmloader-refuses-on-a-hash-check).
 
-5. **Launch the game.** On first run the mod writes a fully commented config file
-   to `%LOCALAPPDATA%\ZERO_Sievert\csq_config.ini`.
+5. **Launch the game.** On first run the mod writes a fully commented reference of
+   every setting to `%LOCALAPPDATA%\ZERO_Sievert\csq_config.ini`, and an empty
+   `csq_config_user.ini` next to it for your own changes.
 
 ### Re-patching after a game update
 
@@ -105,28 +109,78 @@ Fix it by **updating the expected hash**, not by disabling the check:
 
 | Default key | Action |
 |---|---|
+| **F** | Standing next to the recruiter, open the hire menu. Does nothing anywhere else |
 | **F5** | Show or hide the squad panel |
-| **F6** | Add a companion (built from `default_preset`) |
 | **F7** | Dismiss the companion nearest you, permanently |
 | **F8** | Toggle the whole squad between Follow and Hold |
 | **F9** | Dump full squad state to the log — use this when reporting a bug |
+| **F6** | *Debug only:* add one free companion from `default_preset`. Requires `debug_enabled` |
 
-All five are rebindable under `[input]` in the config, as GameMaker virtual key
+In the hire menu: **W**/**S** to choose, **Enter** to buy, **Backspace** to close.
+
+All six are rebindable under `[input]` in the config, as GameMaker virtual key
 codes. Function keys are the defaults specifically because they cannot collide
 with the game's movement and inventory bindings; a bare F5–F9 press reaches
 nothing in vanilla.
+
+**F is the deliberate exception.** It is the game's own Interact key, because
+talking to the recruiter should feel like talking to any other NPC. Both actions do
+fire on one press — a mod cannot consume a key press on the base game's behalf — but
+vanilla's Interact only does anything inside an interactable's own range, and the
+recruiter's corner of the bar is not one. And because F is a key you press
+constantly, the recruit action is a no-op away from the recruiter.
 
 Commands are ignored while the Steam overlay is up, and while you are in a menu,
 dialogue, the inventory, the PDA, crafting, sleeping, dead, or riding the intro
 train — so nothing fires behind a UI.
 
-### What F6 actually does
+### Hiring companions
 
-F6 **creates a new companion** from the `default_preset` setting. It does *not*
-convert a friendly NPC standing near you — there is no proximity check and no
-existing NPC is involved. In a raid the new companion appears beside you; in the
-hub they join the roster and turn up at the start of your next raid. Once the
-roster holds `max_companions`, F6 does nothing (and says so in the log).
+Companions are **bought**, from a hireable-labour contact who stands in the hub bar
+under a floating *Labour Contracts* label. Walk up, press **F**, and pick a tier:
+
+| Tier | Price | What you get |
+|---|---|---|
+| **Rookie** | 2 500 ₽ | The `loner_novice` preset at baseline health |
+| **Veteran** | 6 000 ₽ | `loner_regular`, 1.75× health |
+| **Elite** | 12 000 ₽ | `loner_regular`, 3× health |
+
+The tier is not cosmetic: the preset is where the game gets an NPC's reflexes,
+health and weapon setup, so a more expensive companion genuinely fights better.
+Names, prices, presets and multipliers are all configurable, and you can point a
+tier at the bandit ladder (`bandit_veteran`, `bandit_master`) for smarter AI at the
+cost of looking like a bandit.
+
+Money is taken through the game's own trader transfer, so a hire shows up in your
+rouble count exactly like any other purchase. The menu refuses with a reason when
+you cannot afford a tier or the roster is already at `max_companions`. In a raid a
+new companion appears beside you; in the hub they join the roster for your next
+raid.
+
+`key_debug_spawn` (**F6**) still creates a free companion from `default_preset`,
+ignoring price and the recruiter entirely — but only while `debug_enabled` is on. It
+is a testing tool, not the intended way to build a squad.
+
+### What your companions can see
+
+Companions have working eyes, and what they see counts as something you can see:
+
+- **Anything inside a companion's vision cone is drawn** — enemies, loot containers,
+  and the companions themselves. This is not cosmetic: the base game walks every
+  raid NPC's alpha down to zero outside *your* line of sight, so before this a
+  companion twenty metres ahead was literally not rendered, and neither was their
+  flashlight.
+- **Each cone also clears the fog of war**, inside the game's own subtract pass, so
+  it opens the map up exactly the way your own cone does. No coloured overlays.
+- **The cone is the real one** — the same triangle the companion's AI searches for
+  targets, built from its weapon direction, alert radius and visual distance,
+  including the day/night penalty. What gets revealed is precisely what that
+  companion could actually shoot at.
+
+Optional white position pins (`reveal_companions`) mark companions through fog and
+walls, with an edge arrow when they are off screen. Off by default, because a
+companion standing in fog it cleared itself is already visible. All of it is
+switchable in `[reveal]`.
 
 ### Companion modes
 
@@ -151,20 +205,38 @@ slot.
 
 ## Configuration
 
-The config file is generated on first launch at:
+There are two files, both beside your saves:
 
 ```
-%LOCALAPPDATA%\ZERO_Sievert\csq_config.ini
+%LOCALAPPDATA%\ZERO_Sievert\csq_config.ini        generated — do not edit
+%LOCALAPPDATA%\ZERO_Sievert\csq_config_user.ini   yours
 ```
 
-Edit a value, save, and **restart the game** — the file is read once at boot.
-Delete the file to regenerate it with defaults.
+`csq_config.ini` is a **generated reference**: all **97 settings**, each with its
+current default and a comment explaining it. It is rewritten from scratch every
+launch, so it always matches the version you are running — which means a mod update
+can never leave you with a config file that quietly lacks its new settings.
 
-Every one of the **61 settings** carries its own explanatory comment inside that
-generated file, so the ini is self-documenting. For the full reference —
-grouped, with defaults and tuning advice — see **[CONFIGURATION.md](CONFIGURATION.md)**.
+`csq_config_user.ini` is **yours**. Put in it only the lines you want to change:
 
-The nine sections at a glance:
+```ini
+max_companions = 4
+hp_multiplier = 2
+recruit_tier1_price = 1500
+```
+
+Save, then **restart the game** — config is read once at boot. The mod never
+overwrites this file.
+
+**Nothing to do when you update.** Coming from 1.0.0, your old settings are moved
+into the new user file automatically on the first launch. And if you edit the
+generated file out of habit, the mod moves those lines into your user file for you,
+applies them that same launch, and says so in the log.
+
+For the full reference — grouped, with defaults and tuning recipes — see
+**[CONFIGURATION.md](CONFIGURATION.md)**.
+
+The eleven sections at a glance:
 
 | Section | Controls |
 |---|---|
@@ -176,7 +248,9 @@ The nine sections at a glance:
 | `[ff]` | Friendly fire in both directions, grenade disarming |
 | `[medic]` | Whether and when companions heal you, and how much |
 | `[hud]` | Squad panel position, size and contents |
-| `[input]` | The five keybinds |
+| `[reveal]` | What your companions' vision reveals, and how strongly |
+| `[recruit]` | The recruiter NPC, the three tiers, their prices, menu keys |
+| `[input]` | The six keybinds |
 
 > `csq_` is the mod's internal namespace prefix. It shows up in the config
 > filename, the log filename and the log lines. It is kept short deliberately:
@@ -211,8 +285,14 @@ first.
   and real pathfinding.
 - **Must be re-applied after every game update**, because the update replaces the
   file GMLoader patched.
-- **All companions use one NPC preset.** Per-companion presets are stored in the
-  roster and honoured on load, but F6 always creates the configured default.
+- **All companions of a tier use one NPC preset.** Per-companion presets are stored
+  in the roster and honoured on load, so a mixed squad works, but the choice is per
+  *tier* rather than per hire.
+- **Wall shadows are cast from your position, not your companion's.** Inside ground
+  a companion has revealed, the fog shader still draws shadows relative to you. The
+  base game hands that shader exactly one light position and giving each companion
+  its own would mean an extra shader pass per companion. The ground is revealed
+  correctly; only the direction the shadows fall is wrong.
 - **Companions carry no inventory** and cannot be given gear. They spawn with
   whatever their preset's weapon setup gives them. Medic charges are an abstract
   per-raid count, not an item — healing consumes nothing from anyone's bag.
@@ -227,11 +307,11 @@ first.
 
 ## Uninstalling
 
-1. Delete this mod's 16 files from the `mods/` tree.
+1. Delete this mod's 21 files from the `mods/` tree.
 2. Re-run GMLoader to rebuild a clean `data.win` from `backup.win`.
 
-Optionally also delete `%LOCALAPPDATA%\ZERO_Sievert\csq_config.ini` and
-`logs\csq_log.txt`.
+Optionally also delete `%LOCALAPPDATA%\ZERO_Sievert\csq_config.ini`,
+`csq_config_user.ini` and `logs\csq_log.txt`.
 
 Leftover roster data in a save is harmless — it lives in its own section that the
 base game never reads.

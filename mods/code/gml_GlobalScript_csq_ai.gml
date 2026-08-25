@@ -112,7 +112,17 @@ function csq_ai_init_instance()
     // carried damage with min(carried, inst.hp) immediately after Create -- so the
     // boost has to be in place by the time that clamp runs, or a returning
     // companion would be capped at the unboosted maximum.
+    //
+    // A paid tier recruit carries its own multiplier in csq_hp_mult (set from
+    // global.csq_pending_hp_mult in the Create event). A positive value there wins
+    // over the global hp_multiplier, so a Veteran ends up tougher than a Rookie even
+    // when they share a preset; -1 (a debug-spawn recruit or a legacy roster) uses
+    // the configured default instead.
     var _mult = max(0.1, csq_cfg("hp_multiplier"));
+    if (variable_instance_exists(id, "csq_hp_mult") && is_real(csq_hp_mult) && csq_hp_mult > 0)
+    {
+        _mult = csq_hp_mult;
+    }
     hp = max(1, hp * _mult);
 
     // Maximum health, for the HUD bar and nothing else. NPCs have no hp_max of

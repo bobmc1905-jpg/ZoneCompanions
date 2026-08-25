@@ -1,7 +1,7 @@
 # =============================================================================
 #  Zone Companions  -  code patches
 # -----------------------------------------------------------------------------
-#  The complete list of changes this mod makes to base-game code. Seven code
+#  The complete list of changes this mod makes to base-game code. Nine code
 #  entries. Nothing else in the game is touched.
 #
 #  WHAT HAPPENS WHEN A `find` STRING STOPS MATCHING
@@ -14,10 +14,10 @@
 #  suppresses auto-start (Program.cs line 760) and prints a warning (line 776).
 #
 #  So a game update that shifts the decompiled output degrades one feature and
-#  says exactly which -- it does not brick the install. That is what makes the two
+#  says exactly which -- it does not brick the install. That is what makes the
 #  find-based patches below acceptable.
 #
-#  WHY THE FIRST FIVE ARE `append` AND THE LAST TWO ARE NOT
+#  WHY THE FIRST FIVE ARE `append` AND THE REST ARE NOT
 #  The first five target object *events*, which are bare statement lists, so
 #  appending needs no find string at all and cannot drift. Each of them also needs
 #  state the vanilla event sets up:
@@ -30,11 +30,13 @@
 #    - obj_player_Step_0 runs the player's state machine, so appending means the
 #      squad reacts to this frame's player position, not last frame's.
 #
-#  The last two target GlobalScripts, which wrap a `function` declaration. There,
-#  `append` and `prepend` would land *outside* the function braces -- dead code at
-#  global scope that never runs. `findprependtrim` is the only way in: it matches
-#  on trimmed lines, so it survives indentation changes, and inserts inside the
-#  body.
+#  The last four are find-based. Three target GlobalScripts, which wrap a `function`
+#  declaration: there, `append` and `prepend` would land *outside* the function
+#  braces -- dead code at global scope that never runs. The fourth targets an object
+#  event but has to land part-way through it, because the surface target, blend mode
+#  and camera offsets it depends on only exist at that point. `findprependtrim` is
+#  the only way in for all four: it matches on trimmed lines, so it survives
+#  indentation changes, and it inserts inside the block.
 #
 #  All five event hosts were checked to be flat, top-level, branch-free code with
 #  no early `exit`, so appended code always runs. obj_controller_Create_0 and
@@ -43,7 +45,7 @@
 #  are compile-time and carry no execution order.
 #
 #  Load order is not a concern: these are the only patches the mod ships and they
-#  target seven distinct code entries.
+#  target nine distinct code entries.
 #
 #  NOTE ON THE mods/code/ FOLDER, WHICH IS A DIFFERENT MECHANISM
 #  5_ImportGML.csx line 35 imports every .gml file there with QueueReplace, so a
@@ -147,3 +149,80 @@ gml_GlobalScript_bullet_can_collide_with_npc:
 
     code: |-
         if (csq_ff_block_bullet_on_companion(arg0, arg1)) { return false; }
+
+
+# --- 8. Fog of war: the squad's own vision -------------------------------------
+#  The one patch that has to land in the middle of an event rather than at the end
+#  of it, because everything it needs is local to that spot.
+#
+#  obj_fog_setup_Draw_0 builds vision as a subtraction. It targets surface_shadow,
+#  clears it to opaque black, sets bm_subtract, punches the player's view wedge out
+#  with a triangle fan and their close-range glow out with s_glow_fow, then returns
+#  to bm_normal, runs shd_fog_new over nearby wall geometry to paint shadows back
+#  in, and finally blits the surface over the world.
+#
+#  csq_reveal_fog_subtract adds the squad's cones and glows to that same
+#  subtraction, which is the whole point: a companion's field of view then looks
+#  exactly like the player's, because it is made of the same operation on the same
+#  surface, not of coloured shapes drawn over the finished fog.
+#
+#  WHY THIS EXACT ANCHOR
+#      gpu_set_blendmode(bm_normal);
+#  is line 39 and occurs exactly once in the entry. Inserting before it puts the
+#  call at the last possible moment where all four preconditions still hold:
+#    - surface_shadow is the render target,
+#    - the blend mode is still bm_subtract,
+#    - _camx and _camy are in scope (declared at lines 5-6), which is what converts
+#      a world coordinate to a surface coordinate,
+#    - the shd_fog_new pass has not run yet, so wall shadows are painted in
+#      afterwards and a companion cannot reveal ground through a solid wall.
+#  It is also inside `if (settings_get("FOG FOW"))`, so a player who has that
+#  setting off gets no fog at all and correctly gets no companion cones either.
+#
+#  If this find string ever stops matching, GMLoader skips this patch alone with a
+#  warning: the squad stops clearing fog, and nothing else changes.
+gml_Object_obj_fog_setup_Draw_0:
+  - type: findprependtrim
+    find: |-
+        gpu_set_blendmode(bm_normal);
+
+    code: |-
+        csq_reveal_fog_subtract(_camx, _camy);
+
+
+# --- 9. Visibility: what the squad sees counts as seen --------------------------
+#  Clearing fog was only half of it. Sprites in this game are not merely darkened
+#  outside the player's cone, they are faded to nothing:
+#
+#    obj_npc_parent_Step_0 line 3873, for every NPC in a raid, every frame
+#        var _visibility = player_line_of_sight(x, y);
+#      then walks image_alpha down to 0 when that is false.
+#    obj_chest_general_Step_0 line 39 does the same for containers.
+#    obj_light_enemy_torch_Step_0 then swaps its sprite for s_vuoto and scales by
+#      lerp(0, scale_start, id_linked.image_alpha), so an invisible NPC's flashlight
+#      emits nothing either.
+#
+#  That is why a companion two steps behind the player was invisible however much
+#  fog got cleared around them, and why their torch was dark: their own alpha was 0.
+#
+#  WHY PATCH THE PREDICATE AND NOT THE TWO CALLERS
+#  player_line_of_sight is called from exactly those two places in the whole game
+#  (verified across the decompiled export), and both are cosmetic alpha fades -- no
+#  AI, aggro or damage path consults it. One patch therefore covers NPCs, chests and
+#  flashlights at once, and it puts the change where the question is asked rather
+#  than in two copies of the answer.
+#
+#  Returning true early skips the function's own wall test against the player, which
+#  is correct: csq_reveal_squad_sees runs the same collision_line test from the
+#  companion instead, so nothing is seen through a solid. It also runs before the
+#  `!instance_exists(_player)` guard that returns undefined, which is harmless --
+#  both callers treat undefined as "leave alpha alone".
+#
+#  The anchor is the function's first statement and occurs once in the entry.
+gml_GlobalScript_player_line_of_sight:
+  - type: findprependtrim
+    find: |-
+        var _player = player_get(arg2);
+
+    code: |-
+        if (csq_reveal_squad_sees(arg0, arg1)) { return true; }

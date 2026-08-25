@@ -6,26 +6,47 @@
 //  an entry in csq_config_spec() and an ini key, and is read back through
 //  csq_cfg().
 //
-//  WHERE THE FILE LIVES
+//  WHERE THE FILES LIVE
 //  GameMaker sandboxes relative file I/O into the game's save area, so the
-//  filename below resolves to:
+//  filenames below resolve to:
 //      %LOCALAPPDATA%\ZERO_Sievert\csq_config.ini
+//      %LOCALAPPDATA%\ZERO_Sievert\csq_config_user.ini
 //  (the same folder that already holds installed_mods.json, mods_enabled.json
 //  and the numeric save slots). That is a better home than the game folder: it
 //  survives both GMLoader re-patching and game updates.
 //
+//  THERE ARE TWO FILES, AND ONLY ONE OF THEM IS THE PLAYER'S
+//      csq_config.ini        generated. Every setting, its current default and a
+//                            comment saying what it does. Rewritten from the spec
+//                            on every launch; no value is ever read out of it.
+//      csq_config_user.ini   the player's. Only the lines they want to change.
+//                            The only file overrides come from, and the only file
+//                            the mod will not overwrite.
+//
+//  A single file cannot be both. Written-once-if-missing is the only safe way to
+//  treat a file holding the player's edits, but it also means a mod update can
+//  never reach it: settings added later are simply absent, and defaults changed
+//  later are still documented wrongly. 1.0.0 shipped 61 settings and 1.1.0 has
+//  97, so an upgrading player would have seen none of the 36 new ones. Splitting
+//  them makes the reference disposable -- always regenerated, therefore always
+//  correct -- and the override file tiny, hand-written and update-proof.
+//
+//  The transition is automatic in both directions. On the first launch after an
+//  update there is no user file, so the old single config's non-default values are
+//  adopted into a new one wholesale; and thereafter anything typed into the
+//  generated file by habit is moved across rather than reverted. See
+//  csq_config_adopt_strays.
+//
 //  WHY A HAND-ROLLED PARSER INSTEAD OF ini_open/ini_read_*
 //  GameMaker's ini_close() always rewrites the file from its parsed contents,
-//  which silently strips every comment. Since the whole point of shipping a
-//  generated, commented ini is that the user can read what the keys mean, the
-//  mod writes the file once with comments and thereafter only ever reads it.
-//  A missing key falls back to its default and logs a warning rather than
-//  rewriting the user's file.
+//  which silently strips every comment. Both of these files are mostly comments,
+//  so that is fatal to the format: the reference is unreadable without them and
+//  the user file's instructions would vanish the first time it was touched.
 //
 //  NOTE ON STRUCTURE
 //  Section headers are cosmetic and exist purely to group the file for humans.
 //  Key names are globally unique, so a key is found regardless of which section
-//  it is under.
+//  it is under -- which is what lets the user file be a flat list.
 //
 //  This file declares functions only. It deliberately contains no top-level
 //  executable code -- all initialisation is driven from real object events by
@@ -36,9 +57,10 @@
 
 /// @func   csq_config_spec()
 /// @desc   The single source of truth for every setting: its section, name,
-///         type, default and documentation. Load, default-file generation and
-///         validation are all driven from this one array, so a new setting is
-///         added in exactly one place.
+///         type, default and documentation. Loading, reference-file generation,
+///         stray adoption and validation are all driven from this one array, so a
+///         new setting is added in exactly one place and appears in the player's
+///         reference file the first time the new build runs.
 /// @return {Array} array of {section, key, type, def, comment}
 function csq_config_spec()
 {
@@ -205,12 +227,167 @@ function csq_config_spec()
         { section: "hud", key: "hud_show_hp", type: "bool", def: true,
           comment: "Append current/max HP to each row." },
 
+        // ---- reveal ------------------------------------------------------
+        // The squad's contribution to what the player can see. There are two
+        // separate mechanisms here, because the game hides things in two ways.
+        //
+        // 1. SPRITES ARE FADED OUT, NOT JUST DARKENED
+        // obj_npc_parent_Step_0 line 3873 runs, for every NPC in a raid, every
+        // frame: var _visibility = player_line_of_sight(x, y), and walks image_alpha
+        // down to 0 when that is false. player_line_of_sight is false for anything
+        // outside the player's own 90-degree wedge that is further away than
+        // global.fow_minimun_dis (35px). obj_chest_general_Step_0 line 39 does the
+        // same for containers.
+        //
+        // So a companion standing behind the player is not dim, they are drawn at
+        // alpha 0 -- and their torch goes with them, because
+        // obj_light_enemy_torch_Step_0 swaps its sprite for s_vuoto and scales by
+        // lerp(0, scale_start, id_linked.image_alpha). That is reveal_squad_sight.
+        //
+        // 2. THE GROUND IS PAINTED BLACK
+        // obj_fog_setup_Draw_0 clears a screen-sized surface to opaque black, then
+        // switches to bm_subtract and punches the player's view wedge out of it with
+        // a triangle fan (global.angle_fow degrees, aimed at the cursor) plus
+        // s_glow_fow for close-range awareness. shd_fog_new then paints wall shadows
+        // back in, and the surface is blitted over the world at the player's
+        // "fog of war alpha" setting. That is reveal_view_cone.
+        //
+        // Both use the same triangle the companion's AI actually searches, built
+        // once per frame by csq_reveal_sight_cache, so what they light and what they
+        // let you see can never disagree.
+        { section: "reveal", key: "reveal_squad_sight", type: "bool", def: true,
+          comment: "Let what your companions can see count as something you can see: the companion themselves, their flashlight, and anyone standing in their field of view. This is the setting that stops a companion behind you from being invisible." },
+        { section: "reveal", key: "reveal_view_cone", type: "bool", def: true,
+          comment: "Let each companion's field of view clear the fog of war, the same way the player's does." },
+        // The cone used is the literal triangle scr_find_target_for_human tests
+        // against, not an approximation: apex at the companion, edges at
+        // weapon_pointing_direction +/- alert_radius/2, length alert_visual_distance
+        // after the day/night penalty and scr_npc_oval_view's sideways squash. If it
+        // is not in the triangle, the companion cannot see it -- so the cleared area
+        // is exactly the ground they are actually watching.
+        { section: "reveal", key: "reveal_cone_strength", type: "real", def: 1,
+          comment: "How completely a companion clears the fog, 0-1, applied to both the cone and the glow. 1 matches the player's own vision; lower leaves what they reveal dimmer than what you do." },
+        // This is the setting that answers "why can I not see my own companion
+        // standing right there": their sprite IS drawn every frame --
+        // obj_npc_human_parent_Draw_0 has no visibility test at all -- it is the fog
+        // surface painted over the world afterwards that hides them. So they are
+        // given the same s_glow_fow halo the player gets, subtracted at their feet,
+        // which makes them visible whether or not the player is looking their way.
+        // Independent of reveal_view_cone on purpose: seeing your squad and seeing
+        // what your squad is watching are two different wishes.
+        { section: "reveal", key: "reveal_companion_glow", type: "bool", def: true,
+          comment: "Clear the fog in a small circle around each companion, the way the game does around the player, so a companion outside your own field of view is still visible." },
+        // Position pins are off by default now that companions clear the fog around
+        // themselves: a companion standing in their own cleared ground is visible as
+        // themselves, and a pin on top of that is just clutter. Still here for
+        // finding someone who has fallen behind off screen.
+        { section: "reveal", key: "reveal_companions", type: "bool", def: false,
+          comment: "Mark each companion's position with the game's own NPC pin, drawn over the fog so it shows through walls and darkness." },
+        { section: "reveal", key: "reveal_names", type: "bool", def: true,
+          comment: "Print the companion's name next to their pin. Ignored unless reveal_companions is on." },
+        { section: "reveal", key: "reveal_offscreen", type: "bool", def: true,
+          comment: "When a companion is off screen, pin their marker to the screen edge as an arrow pointing at them, the way the game marks hub NPCs. Ignored unless reveal_companions is on." },
+
+        // ---- recruit -----------------------------------------------------
+        // The paid recruiter NPC by the bar in the bunker. Walk up to them and
+        // press the recruit key (see [input]) to hire companions for roubles.
+        //
+        // WHY TIERS ARE CONFIG, NOT A GAME DIFFICULTY
+        // The game's own difficulty (rookie/standard/survivor/hunter) is a single
+        // global, not a per-NPC value, so it cannot make one companion tougher than
+        // another. Instead each tier maps to a real NPC preset plus an HP multiplier
+        // and a price: a better preset genuinely fights better (npc_setup pulls
+        // reflexes, hp and weapon from it), and the multiplier separates tiers that
+        // share a preset. Only two loner presets exist (loner_novice, loner_regular),
+        // which is why the top tiers reuse loner_regular and pull ahead on HP. Point
+        // a tier's preset at the bandit ladder (bandit_veteran ... bandit_master) for
+        // a genuinely smarter -- if bandit-looking -- companion.
+        { section: "recruit", key: "recruiter_enabled", type: "bool", def: true,
+          comment: "Place a recruiter NPC by the bar in the bunker. Off removes the NPC and the paid menu entirely." },
+        { section: "recruit", key: "recruiter_preset", type: "string", def: "hub_loner_regular",
+          comment: "NPC preset the recruiter LOOKS like (appearance only; they never move or fight). Must exist in gamedata/npc.json; falls back to default_preset if not." },
+        { section: "recruit", key: "recruiter_offset_x", type: "real", def: -32,
+          comment: "Recruiter position as a pixel offset from the barman. Negative x is to the LEFT of the barman." },
+        { section: "recruit", key: "recruiter_offset_y", type: "real", def: 48,
+          comment: "Vertical pixel offset from the barman. Positive y moves DOWN, in front of the bar counter where the player walks, so the recruiter is not hidden behind it." },
+        { section: "recruit", key: "recruiter_range", type: "real", def: 32,
+          comment: "How close you must stand for the recruit prompt to show and the key to open the menu, in pixels." },
+        { section: "recruit", key: "recruiter_depth_bias", type: "real", def: 0,
+          comment: "Draw-order nudge for the recruiter, in pixels. Raise it (try 32 or 64) if he ends up hidden behind the bar counter or a shelf; 0 keeps the vanilla NPC draw order." },
+        { section: "recruit", key: "recruiter_avoid_furniture", type: "bool", def: true,
+          comment: "If the offset lands the recruiter inside the counter, a wall or a shelf, step him out to the nearest clear floor tile (preferring in front of the bar). Off places him exactly on the offset." },
+        { section: "recruit", key: "recruiter_prompt_over_npc", type: "bool", def: true,
+          comment: "Draw the hire prompt above the recruiter's head instead of at a fixed spot low on the screen." },
+        // THE NAME LABEL IS VANILLA'S OWN, NOT A SECOND HAND-DRAWN OVERLAY
+        // obj_controller_Draw_64 walks an obj_controller array called arr_npc_marker
+        // and, for every entry, draws the s_minimap_marker pin plus the entry's text
+        // above it -- that is exactly where "Barman", "Doctor" and "Networker" come
+        // from (see init_npc_marker). Registering one entry there gives the recruiter
+        // a label identical to theirs for free, including the off-screen edge arrow,
+        // the hide-while-outside-the-bunker rule and the player's own
+        // "display_npc_marker" setting. See csq_recruit_marker_sync.
+        { section: "recruit", key: "recruiter_marker_enabled", type: "bool", def: true,
+          comment: "Give the recruiter a floating name label in the bunker, drawn exactly like the Barman's and the Doctor's." },
+        { section: "recruit", key: "recruiter_marker_text", type: "string", def: "Labour Contracts",
+          comment: "Text of the recruiter's name label." },
+        { section: "recruit", key: "recruiter_marker_offset_y", type: "real", def: -8,
+          comment: "Vertical pixel offset of the name label from the recruiter. Negative moves it UP, positive DOWN. -8 sits the pin at his shins and the label over his head; 0 drops it to his chest, and vanilla's own labels use -24, which on a real NPC sprite floats well clear above him." },
+        { section: "recruit", key: "recruit_tier_count", type: "real", def: 3,
+          comment: "How many difficulty tiers the menu offers, 1 to 3." },
+        { section: "recruit", key: "recruit_tier1_name", type: "string", def: "Rookie",
+          comment: "Tier 1 label shown in the menu." },
+        { section: "recruit", key: "recruit_tier1_preset", type: "string", def: "loner_novice",
+          comment: "Tier 1 NPC preset. Must exist in gamedata/npc.json; falls back to default_preset if not." },
+        { section: "recruit", key: "recruit_tier1_hp_mult", type: "real", def: 1.0,
+          comment: "Tier 1 health multiplier, overriding hp_multiplier for this companion." },
+        { section: "recruit", key: "recruit_tier1_price", type: "real", def: 2500,
+          comment: "Tier 1 price per companion, in roubles." },
+        { section: "recruit", key: "recruit_tier2_name", type: "string", def: "Veteran",
+          comment: "Tier 2 label shown in the menu." },
+        { section: "recruit", key: "recruit_tier2_preset", type: "string", def: "loner_regular",
+          comment: "Tier 2 NPC preset. Must exist in gamedata/npc.json; falls back to default_preset if not." },
+        { section: "recruit", key: "recruit_tier2_hp_mult", type: "real", def: 1.75,
+          comment: "Tier 2 health multiplier, overriding hp_multiplier for this companion." },
+        { section: "recruit", key: "recruit_tier2_price", type: "real", def: 6000,
+          comment: "Tier 2 price per companion, in roubles." },
+        { section: "recruit", key: "recruit_tier3_name", type: "string", def: "Elite",
+          comment: "Tier 3 label shown in the menu." },
+        { section: "recruit", key: "recruit_tier3_preset", type: "string", def: "loner_regular",
+          comment: "Tier 3 NPC preset. Must exist in gamedata/npc.json; falls back to default_preset if not. Try bandit_veteran or bandit_master for smarter AI." },
+        { section: "recruit", key: "recruit_tier3_hp_mult", type: "real", def: 3.0,
+          comment: "Tier 3 health multiplier, overriding hp_multiplier for this companion." },
+        { section: "recruit", key: "recruit_tier3_price", type: "real", def: 12000,
+          comment: "Tier 3 price per companion, in roubles." },
+        // Hire-menu navigation. Separate from the [input] binds because these only
+        // ever fire while the menu is open (the player is frozen in the talk state),
+        // so they cannot collide with world controls. Values are GameMaker virtual
+        // key codes: W=87, S=83, vk_enter=13, vk_backspace=8. The up and down arrows
+        // always work too, as fixed aliases. Set one to 0 to disable that action.
+        { section: "recruit", key: "recruit_key_up", type: "real", def: 87,
+          comment: "Menu: raise the value / move the highlight up. Default W (87)." },
+        { section: "recruit", key: "recruit_key_down", type: "real", def: 83,
+          comment: "Menu: lower the value / move the highlight down. Default S (83)." },
+        { section: "recruit", key: "recruit_key_confirm", type: "real", def: 13,
+          comment: "Menu: advance a step, and BUY on the final summary. Default Enter (13)." },
+        { section: "recruit", key: "recruit_key_back", type: "real", def: 8,
+          comment: "Menu: step back, and close from the first step. Default Backspace (8)." },
+
         // ---- input -------------------------------------------------------
         // Defaults are function keys so they cannot collide with the game's
         // movement/inventory bindings. Values are GameMaker virtual key codes:
         // F1=112 ... F12=123, A=65 ... Z=90, 0=48 ... 9=57.
-        { section: "input", key: "key_recruit", type: "real", def: 117,
-          comment: "Add a new companion built from default_preset. In a raid they appear beside you; in the hub they join the roster and turn up at the start of the next raid. Does nothing once the roster holds max_companions. Default F6." },
+        //
+        // key_recruit is the deliberate exception: it is F, the same key vanilla
+        // binds to Interact (scr_load_key_bindings line 53), because talking to the
+        // recruiter should feel like talking to any other NPC. Both actions do fire
+        // on one press -- this mod cannot consume a key press on vanilla's behalf --
+        // but vanilla's Interact only does anything when the player is inside an
+        // interactable's own range, which the recruiter's corner of the bar is not.
+        // Move it to a function key if a future room change puts him next to one.
+        { section: "input", key: "key_recruit", type: "real", def: 70,
+          comment: "Near the recruiter NPC, opens the paid recruitment menu. Does nothing anywhere else. Set to 0 to disable. Default F, matching the game's own Interact key." },
+        { section: "input", key: "key_debug_spawn", type: "real", def: 117,
+          comment: "Instantly adds one free companion from default_preset, anywhere, ignoring price and the recruiter. Only works when debug_enabled is on. Default F6." },
         { section: "input", key: "key_dismiss", type: "real", def: 118,
           comment: "Dismiss the nearest companion. Default F7." },
         { section: "input", key: "key_toggle_hold", type: "real", def: 119,
@@ -224,10 +401,41 @@ function csq_config_spec()
 
 
 /// @func   csq_config_filename()
-/// @desc   Config path, relative so it resolves inside the save area.
+/// @desc   The GENERATED reference file. Rewritten from csq_config_spec() on every
+///         launch, so it always describes the version that is actually running.
+///         No value is ever read back out of it -- see csq_config_user_filename.
+///
+///         Relative, so it resolves inside the save area
+///         (%LOCALAPPDATA%\ZERO_Sievert).
 function csq_config_filename()
 {
     return "csq_config.ini";
+}
+
+
+/// @func   csq_config_user_filename()
+/// @desc   The USER file: the only file overrides are read from, and the only file
+///         the mod will not overwrite. Created once as an all-commented template.
+///
+///         WHY THE CONFIG IS TWO FILES
+///         There used to be one, written only when it did not already exist. That
+///         is the only safe way to treat a single file -- rewriting it would eat the
+///         player's edits -- but it means a mod update can never reach it. Every
+///         setting added after the file was created is missing from it, every
+///         default changed since is still described wrongly, and the player has no
+///         way to find out except by reading CONFIGURATION.md. 1.0.0 shipped 61
+///         settings and 1.1.0 has 97; an upgrading player would have seen none of
+///         the 36 new ones.
+///
+///         Splitting the file makes both halves easy: the reference is disposable,
+///         so it can be regenerated unconditionally and is always correct, and the
+///         user file only ever holds the handful of lines the player typed, so it
+///         survives every update untouched and can never drift out of date. It is
+///         also far smaller, which makes "what have I actually changed?" answerable
+///         at a glance.
+function csq_config_user_filename()
+{
+    return "csq_config_user.ini";
 }
 
 
@@ -251,11 +459,85 @@ function csq_config_format_value(_type, _value)
 }
 
 
-/// @func   csq_config_write_default_file()
-/// @desc   Generate a fully commented ini from csq_config_spec(). Called only
-///         when the file does not exist, so a user's edits are never clobbered.
+/// @func   csq_config_find_entry(_spec, _key)
+/// @desc   The spec entry for a key, or undefined if the running version has no
+///         such setting.
+function csq_config_find_entry(_spec, _key)
+{
+    for (var _i = 0; _i < array_length(_spec); _i++)
+    {
+        if (_spec[_i].key == _key) return _spec[_i];
+    }
+
+    return undefined;
+}
+
+
+/// @func   csq_config_parse_typed(_entry, _text)
+/// @desc   One raw ini string to a typed value, falling back to the entry's own
+///         default. The single place a line's type is interpreted, so the loader
+///         and the stray-value diff below can never disagree about what a line
+///         means.
+function csq_config_parse_typed(_entry, _text)
+{
+    switch (_entry.type)
+    {
+        case "bool":
+            return csq_config_parse_bool(_text, _entry.def);
+
+        case "real":
+            // Reject non-numeric text rather than feeding NaN downstream.
+            if (string_trim(_text) != "" && is_numeric(real(_text))) return real(_text);
+            return _entry.def;
+
+        default:
+            return string_trim(_text);
+    }
+}
+
+
+/// @func   csq_config_is_default(_entry, _text)
+/// @desc   Whether a raw ini line carries this setting's default value.
+///
+///         Compared after parsing rather than as text, so "TRUE", "on" and "1" all
+///         count as equal to `true`, and "3" as equal to `3.0`.
+///
+///         REALS ARE COMPARED AS SCALED INTEGERS, NOT AGAINST A TOLERANCE
+///         This was `abs(_v - _entry.def) < 0.0000001`, which reported every single
+///         real-valued setting as different from its default -- 45 keys "edited" in a
+///         file where 3 were. Whatever the compiler does with a literal that small,
+///         it is not a positive number by the time the comparison runs, and
+///         `abs(0) < 0` is false for every key that matches. Scaling both sides and
+///         rounding needs no epsilon at all, and four decimals is more precision
+///         than the reference file can even express: it is written with string(),
+///         which renders a real to two.
+function csq_config_is_default(_entry, _text)
+{
+    var _v = csq_config_parse_typed(_entry, _text);
+
+    if (_entry.type == "real") return (round(_v * 10000) == round(_entry.def * 10000));
+
+    return (_v == _entry.def);
+}
+
+
+/// @func   csq_config_write_reference_file()
+/// @desc   Generate the fully commented reference ini from csq_config_spec().
+///
+///         WHY THIS IS REWRITTEN EVERY LAUNCH
+///         It is a generated document, not state: every line in it is derived from
+///         the spec, so throwing it away and remaking it loses nothing and
+///         guarantees it matches the code. New settings appear the first time an
+///         updated build runs, changed defaults are described correctly, and a
+///         setting a future version drops disappears instead of lingering as a line
+///         that no longer does anything.
+///
+///         That is only safe because overrides live in csq_config_user_filename()
+///         and nothing here is ever read back for its value. A player who edits
+///         this file anyway is rescued by csq_config_adopt_strays rather than
+///         quietly reverted.
 /// @return {Bool} whether the file was written
-function csq_config_write_default_file()
+function csq_config_write_reference_file()
 {
     var _spec = csq_config_spec();
     var _f = -1;
@@ -264,17 +546,31 @@ function csq_config_write_default_file()
     {
         _f = file_text_open_write(csq_config_filename());
 
-        file_text_write_string(_f, "; ==========================================================");   file_text_writeln(_f);
+        var _bar = "; ==========================================================";
+
+        file_text_write_string(_f, _bar); file_text_writeln(_f);
         // Stamped with the mod identity rather than a literal, so a config file
         // attached to a bug report says which version generated it. Safe to call
         // across modules here for the same reason csq_config_load can call
         // csq_log_info: every csq_* global script is registered by the time any
         // object event runs.
-        file_text_write_string(_f, ";  " + csq_mod_name() + " v" + csq_mod_version() + " configuration"); file_text_writeln(_f);
-        file_text_write_string(_f, ";  Edit values, save, then restart the game.");                    file_text_writeln(_f);
-        file_text_write_string(_f, ";  Delete this file to regenerate it with defaults.");             file_text_writeln(_f);
-        file_text_write_string(_f, ";  Full reference: CONFIGURATION.md in the mod download.");        file_text_writeln(_f);
-        file_text_write_string(_f, "; ==========================================================");   file_text_writeln(_f);
+        file_text_write_string(_f, ";  " + csq_mod_name() + " v" + csq_mod_version() +
+                                   " -- generated reference");                              file_text_writeln(_f);
+        file_text_write_string(_f, ";");                                                    file_text_writeln(_f);
+        file_text_write_string(_f, ";  DO NOT EDIT THIS FILE. It is rewritten from scratch"); file_text_writeln(_f);
+        file_text_write_string(_f, ";  every time the game starts.");                        file_text_writeln(_f);
+        file_text_write_string(_f, ";");                                                    file_text_writeln(_f);
+        file_text_write_string(_f, ";  Put your own settings in:");                          file_text_writeln(_f);
+        file_text_write_string(_f, ";      " + csq_config_user_filename());                  file_text_writeln(_f);
+        file_text_write_string(_f, ";  Only the lines you want to change -- everything else"); file_text_writeln(_f);
+        file_text_write_string(_f, ";  uses the default listed below.");                     file_text_writeln(_f);
+        file_text_write_string(_f, ";");                                                    file_text_writeln(_f);
+        file_text_write_string(_f, ";  If you do edit this file by mistake, the mod moves");  file_text_writeln(_f);
+        file_text_write_string(_f, ";  your changes into the user file for you and says so"); file_text_writeln(_f);
+        file_text_write_string(_f, ";  in logs/csq_log.txt. Nothing is lost.");              file_text_writeln(_f);
+        file_text_write_string(_f, ";");                                                    file_text_writeln(_f);
+        file_text_write_string(_f, ";  Full reference: CONFIGURATION.md in the mod download.");file_text_writeln(_f);
+        file_text_write_string(_f, _bar); file_text_writeln(_f);
 
         var _current_section = "";
         for (var _i = 0; _i < array_length(_spec); _i++)
@@ -310,20 +606,24 @@ function csq_config_write_default_file()
 }
 
 
-/// @func   csq_config_read_file()
-/// @desc   Parse "key = value" lines, ignoring blanks, [sections] and
-///         ; or # comments. Section headers are cosmetic; keys are unique.
+/// @func   csq_config_read_file(_file)
+/// @desc   Parse "key = value" lines out of one ini, ignoring blanks, [sections]
+///         and ; or # comments. Section headers are cosmetic; keys are unique.
+///
+///         A later line wins over an earlier one with the same key, which is what
+///         makes csq_config_adopt_strays able to append rather than rewrite.
+/// @param  {String} _file  which ini to read; a missing file is not an error
 /// @return {Struct} raw string values keyed by setting name
-function csq_config_read_file()
+function csq_config_read_file(_file)
 {
     var _raw = {};
     var _f = -1;
 
     try
     {
-        if (!file_exists(csq_config_filename())) return _raw;
+        if (!file_exists(_file)) return _raw;
 
-        _f = file_text_open_read(csq_config_filename());
+        _f = file_text_open_read(_file);
 
         while (!file_text_eof(_f))
         {
@@ -358,56 +658,272 @@ function csq_config_read_file()
 }
 
 
+/// @func   csq_config_write_user_stub()
+/// @desc   Create the user file if it is absent: a header explaining the split and
+///         a handful of commented-out examples. Never called when the file already
+///         exists, so a player's own file is never touched.
+///
+///         Examples are commented out rather than written live because an empty
+///         override file has to mean "everything default". A stub that actually set
+///         five values would silently change the game for a player who never opened
+///         it.
+/// @return {Bool} whether the file was created
+function csq_config_write_user_stub()
+{
+    if (file_exists(csq_config_user_filename())) return false;
+
+    var _f = -1;
+
+    try
+    {
+        _f = file_text_open_write(csq_config_user_filename());
+
+        var _bar = "; ==========================================================";
+        var _lines = [
+            _bar,
+            ";  " + csq_mod_name() + " -- your settings",
+            ";",
+            ";  This file is yours. The mod creates it once and then only",
+            ";  ever appends to it, to rescue a change you made in",
+            ";  " + csq_config_filename() + " by mistake.",
+            ";",
+            ";  Put ONLY the lines you want to change here. Anything not",
+            ";  listed uses the default from " + csq_config_filename() + ",",
+            ";  which is regenerated every launch and lists every setting",
+            ";  with a description of what it does.",
+            ";",
+            ";  Save, then restart the game -- config is read once at boot.",
+            ";",
+            ";  Section headers are cosmetic: key names are unique, so a",
+            ";  key works wherever you put it in this file.",
+            _bar,
+            "",
+            "; Examples. Delete the leading ; to switch one on.",
+            "",
+            "; max_companions = 4",
+            "; hp_multiplier = 2",
+            "; heal_charges = 4",
+            "; recruit_tier1_price = 1500",
+            "; reveal_cone_strength = 0.75",
+            "; hud_scale = 1.5"
+        ];
+
+        for (var _i = 0; _i < array_length(_lines); _i++)
+        {
+            file_text_write_string(_f, _lines[_i]);
+            file_text_writeln(_f);
+        }
+
+        file_text_close(_f);
+        return true;
+    }
+    catch (_err)
+    {
+        if (_f != -1)
+        {
+            try { file_text_close(_f); } catch (_ignored) {}
+        }
+        return false;
+    }
+}
+
+
+/// @func   csq_config_key_in(_array, _key)
+/// @desc   Written out rather than using array_contains, which the base game never
+///         calls -- and a built-in absent from data.win's function table is a
+///         recompile risk that is not worth taking for a three-line loop.
+function csq_config_key_in(_array, _key)
+{
+    for (var _i = 0; _i < array_length(_array); _i++)
+    {
+        if (_array[_i] == _key) return true;
+    }
+
+    return false;
+}
+
+
+/// @func   csq_config_repurposed_keys()
+/// @desc   Keys that must NOT be carried forward by csq_config_adopt_strays, because
+///         their meaning changed rather than merely their default.
+///
+///         Adoption works by asking "does this line differ from the current
+///         default?", which cannot tell a value the player chose from a value that
+///         was simply the default of an older release. For almost every setting that
+///         does not matter -- being pinned to the old default is the conservative
+///         reading, and it is what the player was running. For a key whose *job*
+///         changed it is actively wrong.
+///
+///         key_recruit is the one case so far. In 1.0.0 it was 117 (F6) and spawned
+///         a free companion; in 1.1.0 it is 70 (F) and opens the paid recruiter menu,
+///         while 117 became key_debug_spawn. Adopting an old `key_recruit = 117`
+///         would put two different commands on F6 and leave the recruiter menu
+///         unreachable, so the new default wins and the log says why.
+///
+///         Keep this list short and delete from it once a release is old enough that
+///         nobody is upgrading across the change.
+function csq_config_repurposed_keys()
+{
+    return ["key_recruit"];
+}
+
+
+/// @func   csq_config_adopt_strays(_spec, _ref_raw, _user_raw)
+/// @desc   Move any hand-edited value out of the generated reference file and into
+///         the user file, and into this session's overrides.
+///
+///         WHY THIS EXISTS
+///         csq_config.ini was the only config file for the first release, and it is
+///         still the file named in every guide, screenshot and forum post. Now that
+///         it is regenerated on every launch, a player editing it would have their
+///         work reverted the next time they started the game -- a worse failure than
+///         the staleness the split was introduced to fix, because it is silent.
+///
+///         So anything in the reference file that is not the current default is
+///         treated as something the player meant, and is copied where it will
+///         survive. Appended rather than rewritten, because a later line wins in
+///         csq_config_read_file, and because appending cannot damage whatever else
+///         the player has in there.
+///
+///         THIS ALSO PERFORMS THE UPGRADE FROM 1.0.0 WITH NO ACTION FROM THE PLAYER
+///         On the first launch after updating there is no user file at all and the
+///         old single config is a pile of strays, so the player's entire previous
+///         configuration is adopted wholesale and nothing has to be re-typed.
+///
+///         Three things are deliberately not adopted. A key the running version does
+///         not know is skipped, so a setting a future release drops does not get
+///         copied forward forever. A key the user file already sets is skipped,
+///         because the user file is the authority -- appending would silently
+///         override the player's own line with an older stray. And a key whose
+///         meaning changed between releases is skipped; see
+///         csq_config_repurposed_keys.
+/// @return {Struct} {adopted, unknown, shadowed, repurposed: Array<String>, persisted: Bool}
+function csq_config_adopt_strays(_spec, _ref_raw, _user_raw)
+{
+    var _out  = { adopted: [], unknown: [], shadowed: [], repurposed: [], persisted: true };
+    var _skip = csq_config_repurposed_keys();
+    var _keys = variable_struct_get_names(_ref_raw);
+
+    for (var _i = 0; _i < array_length(_keys); _i++)
+    {
+        var _key   = _keys[_i];
+        var _text  = variable_struct_get(_ref_raw, _key);
+        var _entry = csq_config_find_entry(_spec, _key);
+
+        if (is_undefined(_entry))
+        {
+            array_push(_out.unknown, _key);
+            continue;
+        }
+
+        if (csq_config_is_default(_entry, _text)) continue;
+
+        if (csq_config_key_in(_skip, _key))
+        {
+            array_push(_out.repurposed, _key);
+            continue;
+        }
+
+        if (variable_struct_exists(_user_raw, _key))
+        {
+            array_push(_out.shadowed, _key);
+            continue;
+        }
+
+        // Honour it this launch as well as saving it, so the edit takes effect
+        // immediately instead of only after another restart.
+        variable_struct_set(_user_raw, _key, _text);
+        array_push(_out.adopted, _key);
+    }
+
+    if (array_length(_out.adopted) == 0) return _out;
+
+    var _f = -1;
+
+    try
+    {
+        _f = file_text_open_append(csq_config_user_filename());
+
+        file_text_writeln(_f);
+        file_text_write_string(_f, "; ---- moved here from " + csq_config_filename() +
+                                   " by v" + csq_mod_version() + " ----");
+        file_text_writeln(_f);
+        file_text_write_string(_f, "; That file is regenerated every launch, so these would");
+        file_text_writeln(_f);
+        file_text_write_string(_f, "; not have survived. Edit or delete them freely.");
+        file_text_writeln(_f);
+
+        for (var _j = 0; _j < array_length(_out.adopted); _j++)
+        {
+            var _k = _out.adopted[_j];
+            file_text_write_string(_f, _k + " = " + variable_struct_get(_ref_raw, _k));
+            file_text_writeln(_f);
+        }
+
+        file_text_close(_f);
+    }
+    catch (_err)
+    {
+        if (_f != -1)
+        {
+            try { file_text_close(_f); } catch (_ignored) {}
+        }
+
+        // The values are live for this session either way -- they went into
+        // _user_raw above. Only persistence failed, so report that distinctly
+        // instead of claiming a save that did not happen.
+        _out.persisted = false;
+    }
+
+    return _out;
+}
+
+
 /// @func   csq_config_load()
-/// @desc   Populate global.csq_cfg_values from defaults, then overlay whatever
-///         the ini provides. Always succeeds: a missing or malformed file just
-///         means defaults. Safe to call more than once.
+/// @desc   Populate global.csq_cfg_values from the spec defaults, then overlay the
+///         user file. Always succeeds: a missing or malformed file just means
+///         defaults. Safe to call more than once.
+///
+///         ORDER MATTERS HERE
+///         The reference file is read BEFORE it is regenerated, because that read is
+///         the only chance to notice a player has edited it. Regenerating first
+///         would destroy the evidence along with their work.
 /// @return {Struct} the populated config struct
 function csq_config_load()
 {
     var _spec = csq_config_spec();
-    var _created = false;
 
-    if (!file_exists(csq_config_filename()))
-    {
-        _created = csq_config_write_default_file();
-    }
+    // 1. Read both files as they stand.
+    var _ref_raw  = csq_config_read_file(csq_config_filename());
+    var _user_raw = csq_config_read_file(csq_config_user_filename());
 
-    var _raw    = csq_config_read_file();
-    var _values = {};
-    var _missing = 0;
+    // 2. Make sure there is somewhere for overrides to live before anything tries
+    //    to append to it.
+    var _stubbed = csq_config_write_user_stub();
+
+    // 3. Rescue anything the player typed into the generated file.
+    var _stray = csq_config_adopt_strays(_spec, _ref_raw, _user_raw);
+
+    // 4. Regenerate the reference, now that nothing needs the old copy.
+    var _wrote = csq_config_write_reference_file();
+
+    // 5. Defaults, overlaid with the user file.
+    var _values    = {};
+    var _overrides = 0;
 
     for (var _i = 0; _i < array_length(_spec); _i++)
     {
         var _e     = _spec[_i];
         var _value = _e.def;
 
-        if (variable_struct_exists(_raw, _e.key))
+        if (variable_struct_exists(_user_raw, _e.key))
         {
-            var _text = variable_struct_get(_raw, _e.key);
+            var _text = variable_struct_get(_user_raw, _e.key);
+            _value    = csq_config_parse_typed(_e, _text);
 
-            switch (_e.type)
-            {
-                case "bool":
-                    _value = csq_config_parse_bool(_text, _e.def);
-                    break;
-
-                case "real":
-                    // Reject non-numeric text rather than feeding NaN downstream.
-                    if (string_trim(_text) != "" && is_numeric(real(_text)))
-                    {
-                        _value = real(_text);
-                    }
-                    break;
-
-                default:
-                    _value = string_trim(_text);
-                    break;
-            }
-        }
-        else
-        {
-            _missing++;
+            // A line that parses back to the default is either belt-and-braces or a
+            // value the mod refused, so it is not counted as an override.
+            if (!csq_config_is_default(_e, _text)) _overrides++;
         }
 
         variable_struct_set(_values, _e.key, _value);
@@ -415,19 +931,104 @@ function csq_config_load()
 
     global.csq_cfg_values = _values;
 
-    // Logging is only available once csq_log has been initialised; csq_init
-    // orders that before this call, so these lines are safe.
-    if (_created)
+    // Logging is only available once csq_log has been initialised; csq_init orders
+    // that before this call, so these lines are safe.
+    if (_wrote)   csq_log_debug("config: regenerated " + csq_config_filename());
+    if (_stubbed) csq_log_info("config: created " + csq_config_user_filename() +
+                               " for your own settings");
+
+    csq_log_info("config: " + string(_overrides) + " override(s) from " +
+                 csq_config_user_filename() + ", " +
+                 string(array_length(_spec) - _overrides) + " default(s)");
+
+    if (array_length(_stray.adopted) > 0)
     {
-        csq_log_info("config: wrote default " + csq_config_filename());
+        // INFO, not DEBUG: the player edited a file and the mod moved their edit
+        // somewhere else. That is something they are entitled to be told about
+        // without first turning on debug logging.
+        csq_log_info("config: moved " + string(array_length(_stray.adopted)) +
+                     " edited setting(s) out of " + csq_config_filename() + " into " +
+                     csq_config_user_filename() + " (" +
+                     csq_config_key_list(_stray.adopted) + ")");
+
+        if (!_stray.persisted)
+        {
+            csq_log_warn("config: could not append to " + csq_config_user_filename() +
+                         "; those settings work now but will be lost on restart");
+        }
     }
-    if (_missing > 0)
+
+    if (array_length(_stray.repurposed) > 0)
     {
-        csq_log_warn("config: " + string(_missing) + " key(s) absent from " +
-                     csq_config_filename() + ", using defaults");
+        // WARN rather than INFO: the player had a value and is not getting it. They
+        // are entitled to know which key and that the new default is in force.
+        csq_log_warn("config: " + csq_config_key_list(_stray.repurposed) +
+                     " changed meaning in v" + csq_mod_version() +
+                     " and was not carried over; the new default is in use. See " +
+                     "CONFIGURATION.md [input]");
+    }
+
+    if (array_length(_stray.shadowed) > 0)
+    {
+        csq_log_warn("config: ignored " + string(array_length(_stray.shadowed)) +
+                     " edit(s) in " + csq_config_filename() + " already set in " +
+                     csq_config_user_filename() + " (" +
+                     csq_config_key_list(_stray.shadowed) + ")");
+    }
+
+    // Typos are the single most common config problem, and the old "N key(s) absent"
+    // warning cannot detect them any more: an absent key is now the normal case.
+    var _unknown = csq_config_unknown_keys(_spec, _user_raw);
+    if (array_length(_unknown) > 0)
+    {
+        csq_log_warn("config: " + string(array_length(_unknown)) +
+                     " unrecognised key(s) in " + csq_config_user_filename() +
+                     ", ignored (" + csq_config_key_list(_unknown) + ")");
     }
 
     return _values;
+}
+
+
+/// @func   csq_config_unknown_keys(_spec, _raw)
+/// @desc   Keys present in a parsed ini that the running version has no setting
+///         for -- almost always a typo, occasionally a leftover from an older
+///         release.
+function csq_config_unknown_keys(_spec, _raw)
+{
+    var _out  = [];
+    var _keys = variable_struct_get_names(_raw);
+
+    for (var _i = 0; _i < array_length(_keys); _i++)
+    {
+        if (is_undefined(csq_config_find_entry(_spec, _keys[_i])))
+        {
+            array_push(_out, _keys[_i]);
+        }
+    }
+
+    return _out;
+}
+
+
+/// @func   csq_config_key_list(_keys)
+/// @desc   Key names for one log line, capped so a wholesale 1.0.0 adoption cannot
+///         write a 60-name paragraph into the log.
+function csq_config_key_list(_keys)
+{
+    var _max = 8;
+    var _n   = array_length(_keys);
+    var _s   = "";
+
+    for (var _i = 0; _i < min(_n, _max); _i++)
+    {
+        if (_i > 0) _s += ", ";
+        _s += _keys[_i];
+    }
+
+    if (_n > _max) _s += ", +" + string(_n - _max) + " more";
+
+    return _s;
 }
 
 

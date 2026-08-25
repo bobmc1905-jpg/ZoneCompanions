@@ -9,7 +9,16 @@
 //  it does not expose its own bindings in a form this mod can safely read. So
 //  rather than guess at a free letter key and risk stealing one the player uses
 //  for a weapon slot or a consumable, the defaults are F5-F9 -- keys the base
-//  game does not bind. All five are configurable as virtual key codes.
+//  game does not bind. All six bindings are configurable as virtual key codes.
+//
+//  THE ONE EXCEPTION IS key_recruit, WHICH IS F
+//  Talking to the recruiter should feel like talking to any other NPC, and F is
+//  what vanilla binds to Interact (scr_load_key_bindings line 53). Both actions do
+//  fire on one press -- a mod cannot consume a key press on vanilla's behalf --
+//  but vanilla's Interact only does anything inside an interactable's own range,
+//  and the recruiter's corner of the bar is not in one. Because F is a key the
+//  player presses constantly, the recruit action does nothing at all away from the
+//  recruiter: see csq_input_recruit.
 //
 //  F5 IS FREE, CHECKED RATHER THAN ASSUMED
 //  Vanilla does reference F5 and F6, but never on their own: player_step_debug_keys
@@ -21,8 +30,8 @@
 //
 //  WHY keyboard_check_pressed AND NOT keyboard_check
 //  Every command here is a discrete action, not a held state. keyboard_check
-//  would fire once per frame, so a single tap of F6 would try to recruit sixty
-//  companions a second.
+//  would fire once per frame, so a single tap would try to run the command sixty
+//  times a second.
 //
 //  WHERE THIS IS CALLED FROM
 //  obj_player_Step_0, which the GMLoader ZERO Sievert guide documents as running
@@ -213,10 +222,46 @@ function csq_input_blocked()
 
 
 /// @func   csq_input_recruit()
-/// @desc   Add a companion built from the configured preset.
+/// @desc   The recruit key's action: open the paid hire menu, but only while stood
+///         next to the recruiter NPC in the bunker.
+///
+///         WHY THIS IS NO LONGER TWO ACTIONS ON ONE KEY
+///         It used to fall through to a free instant hire when pressed away from the
+///         NPC. That was tolerable on F6, a key nothing else uses. It is not
+///         tolerable on F, which is vanilla's Interact and gets pressed constantly --
+///         a debug hire must not be one stray press away every time the player opens
+///         a door. The free hire moved to its own binding, key_debug_spawn; see
+///         csq_input_debug_spawn.
+///
+///         csq_recruit_player_near self-guards when the feature is disabled, so the
+///         check is simply false then.
 function csq_input_recruit()
 {
     csq_log_debug("input: recruit key pressed");
+
+    if (!csq_recruit_player_near())
+    {
+        csq_log_debug("input: not near the recruiter, nothing to open");
+        return;
+    }
+
+    csq_recruit_open_menu();
+}
+
+
+/// @func   csq_input_debug_spawn()
+/// @desc   Free instant companion from default_preset, anywhere, no money and no
+///         recruiter. A development convenience, so it stays behind debug_enabled:
+///         in normal play the recruiter is the only route to companions.
+function csq_input_debug_spawn()
+{
+    csq_log_debug("input: debug spawn key pressed");
+
+    if (!csq_cfg("debug_enabled"))
+    {
+        csq_log_debug("input: free recruit ignored (debug_enabled off); use the recruiter NPC");
+        return;
+    }
 
     if (!csq_squad_recruit(csq_cfg("default_preset")))
     {
@@ -251,6 +296,7 @@ function csq_input_step()
     if (csq_input_blocked()) return;
 
     if (csq_input_pressed("key_recruit"))     csq_input_recruit();
+    if (csq_input_pressed("key_debug_spawn")) csq_input_debug_spawn();
     if (csq_input_pressed("key_dismiss"))     csq_input_dismiss();
     if (csq_input_pressed("key_toggle_hold")) csq_squad_toggle_hold();
     if (csq_input_pressed("key_toggle_hud"))  csq_hud_toggle();

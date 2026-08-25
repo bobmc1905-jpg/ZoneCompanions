@@ -2,29 +2,65 @@
 
 Every tunable value in the mod, with its default and what it actually does.
 
-**Where the file lives**
+## The two config files
+
+Both live beside your saves:
 
 ```
-%LOCALAPPDATA%\ZERO_Sievert\csq_config.ini
+%LOCALAPPDATA%\ZERO_Sievert\csq_config.ini        generated — do not edit
+%LOCALAPPDATA%\ZERO_Sievert\csq_config_user.ini   yours
 ```
 
-It is generated on first launch and is **never rewritten afterwards**, so your
-edits are safe. Delete the file to regenerate it with defaults.
+**`csq_config.ini` is a generated reference.** It lists every setting the running
+version has, with its current default and a one-line description, and it is
+**rewritten from scratch every time the game starts**. Read it, copy from it, but do
+not edit it — your changes there will not stick.
+
+**`csq_config_user.ini` is yours.** It is created once, as a template with
+everything commented out, and the mod never overwrites it. Put in it *only* the
+lines you want to change:
+
+```ini
+max_companions = 4
+hp_multiplier = 2
+recruit_tier1_price = 1500
+```
+
+Anything you do not list uses the default. Section headers are optional — key names
+are globally unique, so a key works wherever you put it.
+
+### Why two files
+
+A single file cannot be both up to date and safe to keep your edits in. The old
+one-file version was only written when it was missing, which is the only way to
+avoid clobbering your settings — but it also meant a mod update could never reach
+it. Every setting added after your file was created was simply absent from it, and
+every default changed since was still described wrongly. 1.0.0 had 61 settings and
+1.1.0 has 97, so an upgrading player would have seen none of the 36 new ones.
+
+Split in two, the reference is disposable and therefore always correct, and your
+overrides are a short list you wrote yourself that no update touches.
+
+### Nothing to do when you update
+
+- **Coming from 1.0.0:** your old `csq_config.ini` settings are moved into a new
+  `csq_config_user.ini` automatically on the first launch. Nothing to re-type.
+- **If you edit `csq_config.ini` out of habit:** the mod notices, moves those lines
+  into your user file for you, applies them immediately, and says so in
+  `logs/csq_log.txt`. Nothing is lost.
 
 **How to change a setting**
 
-1. Edit the value
+1. Add or edit the line in `csq_config_user.ini`
 2. Save
-3. **Restart the game** — the file is read once at boot
+3. **Restart the game** — config is read once at boot
 
-**If a key is missing or misspelled** the mod falls back to that setting's default
-and logs a warning naming how many keys were absent. Nothing breaks and your file
-is not modified.
+**If a key is misspelled** the mod ignores it and logs a warning naming it. Nothing
+breaks and your file is not modified.
 
 **Types.** `bool` accepts `true`/`false`, `yes`/`no`, `on`/`off` or `1`/`0` in any
 casing. `real` is a number; a non-numeric value is rejected in favour of the
-default rather than being fed into the mod as `NaN`. Section headers are cosmetic
-— key names are globally unique, so a key is found whichever section it sits under.
+default rather than being fed into the mod as `NaN`.
 
 ---
 
@@ -76,7 +112,7 @@ tool you reach for when something is broken must not require a config edit first
 |---|---|---|
 | `max_companions` | `3` | How many companions may be active at once. 1–8 is sane. |
 | `default_preset` | `loner_regular` | The NPC preset companions are built from. Must exist in the game's `gamedata/npc.json`. |
-| `auto_spawn_in_raid` | `true` | Respawn the saved roster automatically when a raid map loads. Off means you spawn them by hand with F6. |
+| `auto_spawn_in_raid` | `true` | Respawn the saved roster automatically when a raid map loads. Off means they stay on the roster until you spawn them by hand with the debug spawn key. |
 | `spawn_offset` | `24` | Pixels from the player to start looking for a free spawn cell. |
 | `spawn_delay_frames` | `30` | Frames to wait after a map loads before spawning. Only a floor — the mod additionally waits for the navigation grid and for you to be out of the raid intro, so a slow machine is handled regardless. |
 | `respawn_on_death` | `false` | `false` = a fallen companion is gone for good. `true` = they return at the start of the next raid. |
@@ -234,13 +270,137 @@ Coordinates are in the game's 480×270 GUI space, not screen pixels.
 | `hud_scale` | `1` | Text size for the whole panel, clamped to 0.25–4. `1` is the game's smallest UI font at native size. `0.75` fits more on screen but looks ragged, because that font is a bitmap generated with antialiasing off. |
 | `hud_show_hp` | `true` | Append current/max HP to each row. |
 
-> The F5 visibility state is **not saved**. The config file is only ever written
-> when it is missing, so persisting it would mean rewriting your own ini behind
-> your back. The panel is therefore visible again on every launch.
+> The F5 visibility state is **not saved**. It is a runtime toggle, not a setting —
+> the mod never writes to your `csq_config_user.ini`, so persisting it would mean
+> editing your file behind your back. The panel is therefore visible again on every
+> launch.
 
 ---
 
-## `[input]` — 5 settings
+## `[reveal]` — 7 settings
+
+What your companions can see, and how much of it you get to see. There are two
+independent mechanisms here, because the base game hides things in two different
+ways.
+
+**1. Sprites are faded out, not merely darkened.** For every NPC in a raid, every
+frame, the base game asks `player_line_of_sight(x, y)` and walks that instance's
+`image_alpha` down to `0` when the answer is no. Containers get the same treatment.
+So a companion behind you is not dim, it is not drawn at all — and its flashlight
+goes with it, because the torch object scales its light by its owner's alpha. That
+is `reveal_squad_sight`, which makes a companion's line of sight count as yours.
+
+**2. The ground is painted black.** Fog of war is an opaque black surface with your
+view wedge *subtracted* out of it. That is `reveal_view_cone`, which subtracts each
+companion's wedge from the same surface, in the same pass.
+
+Both use the same triangle the companion's own AI searches for targets — apex at
+the companion, edges at its weapon direction ± half its alert radius, length its
+visual distance after the day/night penalty. If it is not in that triangle, the
+companion genuinely cannot see it, so what is revealed is exactly the ground they
+are watching.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `reveal_squad_sight` | `true` | Let what your companions can see count as something you can see: the companion itself, its flashlight, and anyone standing in its field of view. **This is the setting that stops a companion behind you being invisible.** |
+| `reveal_view_cone` | `true` | Let each companion's field of view clear the fog of war, the same way yours does. |
+| `reveal_cone_strength` | `1` | How completely a companion clears the fog, `0`–`1`, applied to both the cone and the glow. `1` matches your own vision; lower leaves what they reveal dimmer than what you do. |
+| `reveal_companion_glow` | `true` | Clear the fog in a small circle around each companion, the way the game does around you, so a companion outside your own field of view is still visible. Independent of `reveal_view_cone` on purpose — seeing your squad and seeing what your squad is watching are two different wishes. |
+| `reveal_companions` | `false` | Mark each companion's position with the game's own white NPC pin, drawn over the fog so it shows through walls and darkness. |
+| `reveal_names` | `true` | Print the companion's name next to its pin. Ignored unless `reveal_companions` is on. |
+| `reveal_offscreen` | `true` | When a companion is off screen, pin its marker to the screen edge as an arrow pointing at it, the way the game marks hub NPCs. Ignored unless `reveal_companions` is on. |
+
+> **Known limitation.** Wall shadows inside ground a companion has cleared are
+> still cast relative to *your* position. The game's fog shader is handed exactly
+> one light position, the player's, and giving each companion its own would mean a
+> second shader pass per companion. The ground is revealed correctly; only the
+> direction the shadows fall is wrong.
+
+> Position pins are off by default because a companion standing in fog it has
+> cleared itself is already visible as itself, and a pin on top of that is clutter.
+> Turn them on to find someone who has fallen behind off screen.
+
+---
+
+## `[recruit]` — 28 settings
+
+The paid recruiter NPC by the bar in the bunker. Walk up to him and press
+`key_recruit` (**F** by default) to hire companions for roubles.
+
+### The NPC — 8 settings
+
+| Setting | Default | What it does |
+|---|---|---|
+| `recruiter_enabled` | `true` | Place the recruiter in the bunker at all. Off removes the NPC and the paid menu entirely. |
+| `recruiter_preset` | `hub_loner_regular` | The NPC preset he *looks* like — appearance only; he never moves or fights. Must exist in `gamedata/npc.json`; falls back to `default_preset` if not. |
+| `recruiter_offset_x` | `-32` | His position as a pixel offset from the barman. Negative x is to the **left** of the barman. |
+| `recruiter_offset_y` | `48` | Vertical offset from the barman. Positive y moves **down**, in front of the bar counter where you walk, so he is not hidden behind it. |
+| `recruiter_range` | `32` | How close you must stand for the prompt to show and the key to open the menu, in pixels. |
+| `recruiter_depth_bias` | `0` | Draw-order nudge, in pixels. Raise it (try `32` or `64`) if he ends up hidden behind the counter or a shelf; `0` keeps the vanilla NPC draw order. |
+| `recruiter_avoid_furniture` | `true` | If the offset lands him inside the counter, a wall or a shelf, step him out to the nearest clear floor tile, preferring the front of the bar. Off places him exactly on the offset. |
+| `recruiter_prompt_over_npc` | `true` | Draw the hire prompt above his head instead of at a fixed spot low on the screen. |
+
+### The name label — 3 settings
+
+The floating label is the game's **own** NPC marker, not a second hand-drawn
+overlay: registering one entry in the controller's marker array is exactly where
+"Barman", "Doctor" and "Networker" come from, so the recruiter gets a label
+identical to theirs for free — including the off-screen edge arrow, the
+hide-while-outside-the-bunker rule and your own "display NPC marker" setting.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `recruiter_marker_enabled` | `true` | Give him a floating name label, drawn exactly like the Barman's. |
+| `recruiter_marker_text` | `Labour Contracts` | The label's text. |
+| `recruiter_marker_offset_y` | `-8` | Vertical offset of the label. Negative moves it **up**. `-8` sits the pin at his shins and the label over his head; `0` drops it to his chest; vanilla's own labels use `-24`, which floats well clear above him. |
+
+### Tiers — 13 settings
+
+| Setting | Default | What it does |
+|---|---|---|
+| `recruit_tier_count` | `3` | How many tiers the menu offers, `1`–`3`. |
+| `recruit_tier1_name` | `Rookie` | Tier 1 label in the menu. |
+| `recruit_tier1_preset` | `loner_novice` | Tier 1 NPC preset. Must exist in `gamedata/npc.json`. |
+| `recruit_tier1_hp_mult` | `1.0` | Tier 1 health multiplier, overriding `hp_multiplier` for that companion. |
+| `recruit_tier1_price` | `2500` | Tier 1 price, in roubles. |
+| `recruit_tier2_name` | `Veteran` | Tier 2 label. |
+| `recruit_tier2_preset` | `loner_regular` | Tier 2 NPC preset. |
+| `recruit_tier2_hp_mult` | `1.75` | Tier 2 health multiplier. |
+| `recruit_tier2_price` | `6000` | Tier 2 price. |
+| `recruit_tier3_name` | `Elite` | Tier 3 label. |
+| `recruit_tier3_preset` | `loner_regular` | Tier 3 NPC preset. Try `bandit_veteran` or `bandit_master` for smarter AI. |
+| `recruit_tier3_hp_mult` | `3.0` | Tier 3 health multiplier. |
+| `recruit_tier3_price` | `12000` | Tier 3 price. |
+
+> **Why tiers are config rather than a difficulty setting.** The game's own
+> difficulty is a single global, not a per-NPC value, so it cannot make one
+> companion tougher than another. Each tier instead maps to a real NPC preset plus
+> an HP multiplier and a price: a better preset genuinely fights better — reflexes,
+> health and weapon all come from it — and the multiplier separates tiers that share
+> a preset. Only two loner presets exist, which is why the top tiers reuse
+> `loner_regular` and pull ahead on HP.
+
+### Menu navigation — 4 settings
+
+Separate from `[input]` because these only ever fire while the menu is open, with
+you frozen in the talk state, so they cannot collide with world controls. The up
+and down arrow keys always work too, as fixed aliases. Set one to `0` to disable
+that action.
+
+| Setting | Default | Key | What it does |
+|---|---|---|---|
+| `recruit_key_up` | `87` | W | Move the highlight up. |
+| `recruit_key_down` | `83` | S | Move the highlight down. |
+| `recruit_key_confirm` | `13` | Enter | Advance a step, and **buy** on the final summary. |
+| `recruit_key_back` | `8` | Backspace | Step back, and close the menu from the first step. |
+
+> Money is taken through the game's own trader transfer, so a hire shows up in your
+> rouble count exactly like any other purchase. The menu refuses with a reason when
+> you cannot afford a tier or the roster already holds `max_companions`.
+
+---
+
+## `[input]` — 6 settings
 
 Values are **GameMaker virtual key codes**, not letters:
 
@@ -252,20 +412,32 @@ Set a binding to `0` (or anything outside 1–255) to disable that command.
 
 | Setting | Default | Key | What it does |
 |---|---|---|---|
+| `key_recruit` | `70` | F | Standing next to the recruiter, opens the paid hire menu. **Does nothing anywhere else.** |
 | `key_toggle_hud` | `116` | F5 | Show or hide the squad panel. Resets to shown every launch. |
-| `key_recruit` | `117` | F6 | Add a new companion built from `default_preset`. In a raid they appear beside you; in the hub they join the roster for your next raid. Does nothing once the roster holds `max_companions`. |
+| `key_debug_spawn` | `117` | F6 | Instantly add one free companion from `default_preset`, anywhere, ignoring price and the recruiter. **Only works while `debug_enabled` is on.** |
 | `key_dismiss` | `118` | F7 | Dismiss the companion nearest you, permanently. |
 | `key_toggle_hold` | `119` | F8 | Toggle the whole squad between Follow and Hold. |
 | `key_debug_dump` | `120` | F9 | Dump full squad state to the log. Works regardless of the `[debug]` settings. |
 
-> **F6 does not convert a nearby NPC.** There is no proximity check and no
-> existing NPC is involved — it creates a fresh companion from the configured
-> preset.
+> **Why `key_recruit` is F and not a function key.** F is what the base game binds
+> to Interact, and talking to the recruiter should feel like talking to any other
+> NPC. Both actions do fire on one press — a mod cannot consume a key press on the
+> base game's behalf — but vanilla's Interact only does anything while you are
+> inside an interactable's own range, and the recruiter's corner of the bar is not
+> one. And because F is a key you press constantly, the recruit action is a no-op
+> away from the recruiter. Move it to a function key if a future game update puts
+> an interactable next to him.
 
-Function keys are the defaults because they cannot collide with the game's
-movement and inventory bindings. This was checked rather than assumed: vanilla
-only ever reads F5 and F6 *with* a modifier, so a bare F5–F9 press reaches nothing
-in the base game.
+> **The debug spawn key does not convert a nearby NPC.** There is no proximity
+> check and no existing NPC is involved — it creates a fresh companion from
+> `default_preset`, free, at your side. It is a testing tool, which is why it is
+> gated behind `debug_enabled`; the intended way to gain companions is to pay the
+> recruiter.
+
+Function keys are the defaults for everything else because they cannot collide with
+the game's movement and inventory bindings. This was checked rather than assumed:
+vanilla only ever reads F5 and F6 *with* a modifier, so a bare F5–F9 press reaches
+nothing in the base game.
 
 Commands are suppressed while the Steam overlay is up, and while your player state
 is any of inventory, PDA, talk, craft, item spawn, sleep, dead, raid start,
@@ -276,6 +448,8 @@ a command firing during a state nobody classified.
 ---
 
 ## Tuning recipes
+
+Put these in `csq_config_user.ini`.
 
 **"They keep falling behind."**
 Raise `speed_catchup_mult` (try `2.2`), then `speed_max` (try `4`). Those two
@@ -303,3 +477,26 @@ genuinely tanky. Difficulty scaling applies on top either way.
 
 **"I want a stealthier game with no HUD."**
 `hud_enabled = false`. Companions still work; you just lose the readout.
+
+**"Companions are too cheap / too expensive."**
+`recruit_tier1_price`, `recruit_tier2_price`, `recruit_tier3_price`. For a run where
+companions are a real investment, try `5000` / `15000` / `40000`.
+
+**"I want smarter companions, not just tougher ones."**
+Point the tiers at the bandit ladder: `recruit_tier2_preset = bandit_veteran`,
+`recruit_tier3_preset = bandit_master`. They will look like bandits, but the preset
+is where reflexes and weapon choice come from.
+
+**"Squad vision feels like cheating."**
+`reveal_view_cone = false` keeps them visible without opening the map up, or
+`reveal_cone_strength = 0.5` leaves what they reveal dimmer than what you see. For
+the 1.0.0 behaviour, set `reveal_squad_sight`, `reveal_view_cone` and
+`reveal_companion_glow` all to `false`.
+
+**"I keep losing a companion off screen."**
+`reveal_companions = true` — pins them through fog and walls, with an edge arrow
+when they are off screen.
+
+**"I want no recruiter, just free companions."**
+`recruiter_enabled = false`, plus `debug_enabled = true` to enable the F6 free
+spawn.

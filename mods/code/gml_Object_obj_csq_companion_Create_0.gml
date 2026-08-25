@@ -49,6 +49,14 @@ event_inherited();
 var _csq_preset = undefined;
 var _csq_name   = undefined;
 
+// -1 = no per-companion override; csq_ai_init_instance falls back to the
+// configured hp_multiplier. A tier recruit passes its own value through here.
+csq_hp_mult = -1;
+if (variable_global_exists("csq_pending_hp_mult"))
+{
+    csq_hp_mult = global.csq_pending_hp_mult;
+}
+
 if (variable_global_exists("csq_pending_preset"))
 {
     _csq_preset = global.csq_pending_preset;
