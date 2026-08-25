@@ -1,0 +1,136 @@
+# =============================================================================
+#  Publish a release to Nexus Mods
+# -----------------------------------------------------------------------------
+#  Publishing a GitHub release is the go signal. This job takes the .7z attached
+#  to that release and adds it to the Nexus mod page as a new version of an
+#  existing file, through Nexus's own upload action (their v3 upload API).
+#
+#  WHAT HAS TO BE SET UP ONCE, BY HAND
+#    1. The mod page has to exist on Nexus already, with at least one file on it.
+#       The upload API adds a *version* to an existing file -- it cannot create a
+#       mod page, and it cannot create the first file.
+#    2. Repository secret  NEXUSMODS_API_KEY  -- a personal key from
+#       https://www.nexusmods.com/settings/api-keys
+#    3. Repository variable NEXUS_FILE_ID  -- the id of the file to add versions
+#       to. Files tab of the public mod page -> "API Info", or the edit menu on
+#       Manage Files.
+#    4. Repository variable NEXUS_MOD_ID  -- optional, and only needed to post the
+#       changelog entry. It is the mod's internal id, not the number in the page
+#       URL: GET https://api.nexusmods.com/v3/games/zerosievert/mods/<page number>
+#       and read the "id" field.
+#
+#  Until 2 and 3 are present the job skips with a notice rather than failing, so
+#  this can sit in the repo before the Nexus page is ready.
+#
+#  The file description and the changelog entry are lifted verbatim from the
+#  VERSION block in CHANGELOG-NEXUS.txt, which is already written in plain
+#  language for Nexus readers rather than in Markdown for GitHub.
+# =============================================================================
+
+name: Publish to Nexus Mods
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish, e.g. 1.1.1. Defaults to the latest release."
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  nexus:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve the version
+        id: ver
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_VERSION: ${{ inputs.version }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          if   [ -n "${INPUT_VERSION:-}" ]; then VERSION="${INPUT_VERSION#v}"
+          elif [ -n "${TAG:-}" ];           then VERSION="${TAG#v}"
+          else VERSION="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"; VERSION="${VERSION#v}"
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "::error::could not work out which version to publish"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Download the release archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download "v${{ steps.ver.outputs.version }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "ZoneCompanions-${{ steps.ver.outputs.version }}.7z" \
+            --dir dist
+          ls -la dist
+
+      - name: Check the Nexus wiring
+        id: cfg
+        env:
+          NEXUS_KEY: ${{ secrets.NEXUSMODS_API_KEY }}
+          FILE_ID: ${{ vars.NEXUS_FILE_ID }}
+        run: |
+          set -euo pipefail
+          MISSING=""
+          [ -z "${NEXUS_KEY:-}" ] && MISSING="the NEXUSMODS_API_KEY secret"
+          [ -z "${FILE_ID:-}" ]   && MISSING="${MISSING:+$MISSING and }the NEXUS_FILE_ID variable"
+          if [ -n "$MISSING" ]; then
+            echo "::notice::Nexus upload skipped -- still missing $MISSING. Create the mod page and its first file by hand, then add them."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Lift the release notes out of CHANGELOG-NEXUS.txt
+        id: notes
+        if: ${{ steps.cfg.outputs.configured == 'true' }}
+        run: |
+          set -euo pipefail
+          BLOCK="$(awk -v v="VERSION ${{ steps.ver.outputs.version }}" '
+            $0 == v      { grab = 1; next }
+            grab && /^VERSION / { exit }
+            grab         { print }
+          ' CHANGELOG-NEXUS.txt | python3 -c 'import sys; print(sys.stdin.read().strip())')"
+          if [ -z "$BLOCK" ]; then
+            echo "::warning::no 'VERSION ${{ steps.ver.outputs.version }}' block in CHANGELOG-NEXUS.txt -- uploading without a description"
+          fi
+          {
+            echo "text<<CSQ_NOTES_EOF"
+            echo "$BLOCK"
+            echo "CSQ_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # Pinned to a tag rather than a moving ref: this is a beta action and the
+      # upload API it talks to is itself in open beta.
+      #
+      # archive_existing_version keeps the page tidy -- the previous version moves
+      # to old files instead of sitting alongside the new one. update_mod_version
+      # makes the page's version number follow the release. changelog is only sent
+      # when NEXUS_MOD_ID is set, because the API rejects one without it.
+      - name: Upload to Nexus Mods
+        if: ${{ steps.cfg.outputs.configured == 'true' }}
+        uses: Nexus-Mods/upload-action@v1.0.0-beta.10
+        with:
+          api_key: ${{ secrets.NEXUSMODS_API_KEY }}
+          file_id: ${{ vars.NEXUS_FILE_ID }}
+          filename: dist/ZoneCompanions-${{ steps.ver.outputs.version }}.7z
+          version: ${{ steps.ver.outputs.version }}
+          display_name: Zone Companions ${{ steps.ver.outputs.version }}
+          description: ${{ steps.notes.outputs.text }}
+          category: main
+          archive_existing_version: true
+          update_mod_version: true
+          mod_id: ${{ vars.NEXUS_MOD_ID }}
+          changelog: ${{ vars.NEXUS_MOD_ID && steps.notes.outputs.text || '' }}
