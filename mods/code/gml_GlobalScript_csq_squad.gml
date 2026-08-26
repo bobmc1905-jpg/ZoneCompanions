@@ -305,11 +305,18 @@ function csq_squad_spawn_entry(_entry, _slot)
         global.csq_pending_name    = _entry.name;
         global.csq_pending_hp_mult = csq_struct_get(_entry, "hp_mult", -1);
 
+        // The formation slot travels the same way, for the same reason. It cannot
+        // wait for the assignment eleven lines below: csq_human_init_instance seeds
+        // the companion's identity from it during Create, and by then csq_slot is
+        // still 0 for everyone.
+        global.csq_pending_slot    = _slot;
+
         var _inst = instance_create_depth(_pos.x, _pos.y, 0, obj_csq_companion);
 
         global.csq_pending_preset  = undefined;
         global.csq_pending_name    = undefined;
         global.csq_pending_hp_mult = -1;
+        global.csq_pending_slot    = 0;
 
         if (!instance_exists(_inst))
         {
@@ -340,6 +347,7 @@ function csq_squad_spawn_entry(_entry, _slot)
         global.csq_pending_preset  = undefined;
         global.csq_pending_name    = undefined;
         global.csq_pending_hp_mult = -1;
+        global.csq_pending_slot    = 0;
         csq_log_exception("csq_squad_spawn_entry", _err);
         return noone;
     }

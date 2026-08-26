@@ -106,6 +106,61 @@ function csq_ai_init_instance()
     // mid-raid -- see csq_ai_torch_ensure for why it needs verifying at all.
     csq_torch_timer   = 0;
 
+    // ---- identity ----------------------------------------------------------
+    // Per-companion timing, reaction and disposition. Called here rather than from
+    // the Create event so that every companion variable is set in one place, and
+    // early enough that anything below could read the values if it ever needs to.
+    //
+    // It is the only thing in this file that adjusts human_tick_max_ref, and it does
+    // so exactly once. See csq_human for why the seed comes from
+    // global.csq_pending_slot and not from csq_slot.
+    csq_human_init_instance();
+
+    // ---- self-care ---------------------------------------------------------
+    // The bandage machine's own state. Bandages themselves live on the roster, not
+    // here -- see the note at the top of csq_care.
+    csq_care_init_instance();
+
+    // ---- idle chatter ------------------------------------------------------
+    // Rolls this companion's first wait, so a squad that spawns together does not
+    // all speak on the frame it lands.
+    csq_voice_init_instance();
+
+    // ---- idle life ---------------------------------------------------------
+    // Counters for the smoke/drink/eat gate. All zero, so a companion has to earn a
+    // full calm stretch after spawning before it can sit down.
+    csq_idle_init_instance();
+
+    // ---- combat footwork ---------------------------------------------------
+    // Push state. csq_push_timer counts down the frames left in a committed move;
+    // csq_push_cd covers the move plus the pause after it, so pushes cannot chain.
+    // The goal is stored rather than recomputed because recomputing it every frame
+    // is precisely what a commit is meant to prevent -- see csq_combat.
+    csq_push_timer  = 0;
+    csq_push_cd     = 0;
+    csq_push_goal_x = x;
+    csq_push_goal_y = y;
+
+    // Where the companion stood on the previous frame of a push, and the minimum
+    // gap between forced route rebuilds. Together they answer "is anything actually
+    // walking this path" without asking GameMaker directly -- see
+    // csq_combat_stalled for why that question is not asked.
+    csq_push_last_x    = x;
+    csq_push_last_y    = y;
+    csq_push_repath_cd = 0;
+
+    // Spread runs on its own cooldown rather than sharing csq_push_cd: standing on
+    // top of a squadmate is worth fixing during the pause between advances instead
+    // of waiting for it to end -- see csq_combat_spread.
+    csq_spread_cd = 0;
+
+    // Anti-root watch: where this companion has been standing, and for how long.
+    // Read by csq_combat_reposition, which is the one piece of footwork allowed to
+    // run when the companion is already close enough to the target.
+    csq_root_x      = x;
+    csq_root_y      = y;
+    csq_root_frames = 0;
+
     // ---- toughness ---------------------------------------------------------
     // npc_setup has just set hp from the preset -- 60 for loner_regular, the same
     // as the enemies you kill three at a time. A companion that fights alongside
@@ -189,9 +244,92 @@ function csq_ai_set_mode(_mode)
 }
 
 
+/// @func   csq_ai_target_is_protected(_target)
+/// @desc   Whether _target is a permanent friendly/service NPC that companions
+///         must never attack, even when another mod changes its faction.
+///
+///         Faction is normally enough: vanilla labels these people "All Friend"
+///         or "Player". It is not a safety boundary, though. Data overhauls can
+///         reclassify a trader as a Bandit while retaining the same trader role;
+///         EFZ does exactly that to Mr. Junk. A companion mirrors the player's
+///         relation to Bandits, so faction-only targeting would then kill a
+///         quest-critical NPC.
+///
+///         The positive trader_id test is deliberately broad, covering both
+///         vanilla and added traders. The short npc/object list is only for
+///         service and story NPCs that have no trader_id. It deliberately does
+///         NOT match generic `quest_*` ids: several of those are intended kill
+///         targets, and protecting them would break their quests.
+/// @return {Bool}
+function csq_ai_target_is_protected(_target)
+{
+    try
+    {
+        if (_target == noone || _target == -4) return false;
+        if (!instance_exists(_target))         return false;
+
+        // Preserve vanilla's broad, inexpensive guarantee first.
+        if (variable_instance_exists(_target, "faction"))
+        {
+            if (_target.faction == "Player" || _target.faction == "All Friend")
+            {
+                return true;
+            }
+        }
+
+        // A real trader must never become a squad target. "no_trader" is the
+        // sentinel vanilla writes into ordinary NPC records.
+        if (variable_instance_exists(_target, "trader_id"))
+        {
+            var _trader = string(_target.trader_id);
+            if (_trader != "" && _trader != "no_trader" && _trader != "undefined")
+            {
+                return true;
+            }
+        }
+
+        // Vanilla's two traders that have save-impacting death branches. Test
+        // object identity as well as npc_id so an external data override cannot
+        // remove this protection by changing a record field.
+        if (_target.object_index == obj_junk_trader)   return true;
+        if (_target.object_index == obj_forest_trader) return true;
+
+        if (!variable_instance_exists(_target, "npc_id")) return false;
+
+        // Named service and story NPCs with no trader_id. These are permanent
+        // friendly roles, unlike the intentionally hostile quest_kill_target_*.
+        switch (string(_target.npc_id))
+        {
+            case "capotreno":
+            case "daily_quest_giver":
+            case "engineer":
+            case "forest_trader":
+            case "guide_npc":
+            case "junk_trader":
+            case "quest_dealer":
+            case "green_army_prologue":
+            case "green_army_prologue_2":
+            case "green_army_quest_swamp":
+            case "green_army_quest_swamp_leader":
+            case "tutorial_npc":
+                return true;
+        }
+    }
+    catch (_err)
+    {
+        // Fail closed. A bad data field must make the squad leave that NPC
+        // alone, never turn an unknown quest giver into a valid target.
+        return true;
+    }
+
+    return false;
+}
+
+
 /// @func   csq_ai_hostile_target_exists()
 /// @desc   Whether `target` is a live instance this companion should shoot.
-///         Hostility is derived from the reputation value rather than the
+///         Protected quest/service NPCs are rejected before the faction test.
+///         Hostility is otherwise derived from reputation rather than the
 ///         relation enum, so it does not depend on decompiled enum numbering.
 function csq_ai_hostile_target_exists()
 {
@@ -199,6 +337,7 @@ function csq_ai_hostile_target_exists()
     {
         if (target == -4)            return false;
         if (!instance_exists(target)) return false;
+        if (csq_ai_target_is_protected(target)) return false;
 
         if (!variable_instance_exists(target, "faction")) return false;
 
@@ -228,8 +367,11 @@ function csq_ai_scan_for_targets()
     try
     {
         // The leash (set in csq_ai_update_leash) makes this only ever return
-        // enemies near the player.
+        // enemies near the player. Its faction result still has to pass the
+        // service/quest safety gate: data mods are allowed to alter faction
+        // values, but must not turn a vendor into a squad target.
         target = scr_find_target_for_human();
+        if (csq_ai_target_is_protected(target)) target = -4;
     }
     catch (_err)
     {
@@ -245,19 +387,41 @@ function csq_ai_scan_for_targets()
 ///
 ///         WHY THE ANCHOR MOVES TOWARD THE ENEMY IN A FIGHT
 ///         original_x/original_y is not only the leash centre. obj_npc_parent_Step_0
-///         line 729, inside the human_general utility selector, reads:
-///             if (leash_to_spawn && point_distance(x, y, original_x, original_y) > 20)
+///         line 732, inside the human_general utility selector, reads:
+///             if (point_distance(x, y, original_x, original_y) > 20)
 ///                 ds_priority_add(_list_action, Value_9, global.sub_ai_peso[p]);
 ///         and Value_9 is scr_enemy_choose_move_pos(original_x, original_y, 0) --
-///         "go back to the anchor". With the anchor pinned to the player, every
-///         frame a companion got more than 20px away the selector was handed a
-///         "walk back to the player" candidate competing against shooting, cover
-///         and flanking. That is what made them hover at the player's feet mid-fight
-///         instead of pressing the attack.
+///         "go back to the anchor". With the anchor pinned to the player, a
+///         companion more than 20px out was handed a "walk back to the player"
+///         candidate, which is what made them hover at the player's feet instead of
+///         holding ground where they were useful.
 ///
 ///         Biasing the anchor at the target turns that same vanilla action into an
 ///         advance, with no combat code and without touching global.sub_ai_peso --
 ///         those weights are shared by every NPC in the game.
+///
+///         BUT IT DOES NOTHING WHILE THE COMPANION IS ACTUALLY SHOOTING
+///         Corrected after reading the selector properly. That ds_priority_add is
+///         nested inside
+///             if (_no_target_or_ally == true)      // line 702
+///         which opens 30 lines above it, so action 9 is only ever offered when the
+///         NPC has no hostile target at all. It never competes with shooting (11),
+///         cover (26) or advancing (29) -- the earlier version of this comment said
+///         it did, and that was wrong.
+///
+///         Worse, it cannot fire even between bursts: the bias below is applied only
+///         while csq_ai_hostile_target_exists(), and the moment that stops being
+///         true the anchor snaps back to the player, which is also the moment
+///         action 9 becomes available. The two conditions are mutually exclusive by
+///         construction.
+///
+///         So engage_advance has exactly one live effect, and it is the one
+///         documented at the leash_radius line below: it moves the point that
+///         scr_find_target_for_human measures target distance from, extending
+///         acquisition reach toward the enemy. It does not move anyone's feet.
+///         Closing distance in a firefight is csq_combat's job -- see
+///         csq_combat_push, and the note there about action 29 being gated on
+///         range_type != 0.
 ///
 ///         The offset is clamped to engage_advance, so a companion still cannot
 ///         wander off after something: worst case they end up engage_advance px
@@ -595,6 +759,23 @@ function csq_ai_drive_follow(_player)
     var _facing = csq_ai_update_facing(_player);
     var _total  = max(1, csq_squad_count());
     var _slot   = csq_formation_point(csq_slot, _total, _player.x, _player.y, _facing);
+
+    // Personal formation radius. csq_follow_bias is this companion's own +/- pixel
+    // offset (csq_human), pushed along the line from the player to its slot so the
+    // arc geometry is untouched and only this one companion's distance changes.
+    //
+    // Without it every companion sits on the same circle, which is what makes four
+    // of them read as one object with four sprites: they arrive together, stop
+    // together, and turn together. A handful of pixels is enough to break that up
+    // without loosening the formation in any way a player would call sloppy.
+    //
+    // Zero when de-sync is off, so this whole block collapses to the old behaviour.
+    if (variable_instance_exists(id, "csq_follow_bias") && csq_follow_bias != 0)
+    {
+        var _bias_dir = point_direction(_player.x, _player.y, _slot.x, _slot.y);
+        _slot.x += lengthdir_x(csq_follow_bias, _bias_dir);
+        _slot.y += lengthdir_y(csq_follow_bias, _bias_dir);
+    }
 
     // Slide the whole formation toward the cursor. Applied to the slot rather than
     // to the anchor handed to csq_formation_point, so the fan-out geometry -- the
@@ -1094,6 +1275,44 @@ function csq_ai_step()
     // 1. Keep the vanilla leash pinned to the player.
     csq_ai_update_leash(_player);
 
+    // 1a. event_inherited() ran before this function, so vanilla may have
+    // re-acquired a target while the companion was in human_general. Remove a
+    // protected NPC immediately and leave engage in this same frame. The bullet
+    // collision guard in csq_ff covers the one inherited frame before this code
+    // gets control, which closes both the AI and damage paths.
+    if (csq_ai_target_is_protected(target))
+    {
+        target = -4;
+
+        if (csq_mode == csq_ai_mode_engage())
+        {
+            csq_no_target = 0;
+            csq_ai_set_mode(global.csq_squad_hold ? csq_ai_mode_hold() : csq_ai_mode_follow());
+        }
+    }
+
+    // 1b. Self-care, before anything else can give this companion a job.
+    //
+    //     A wounded companion binds before it does anything else -- that is the whole
+    //     point of the behaviour, and it is why this sits above the dispatch rather
+    //     than inside it. When it returns true it has taken the frame: no medic, no
+    //     engage, no follow, and no combat footwork. Vanilla's own Step has already
+    //     run by here (event_inherited), so "hold still" is re-asserted against
+    //     whatever that decided, every frame, rather than set once and hoped for.
+    //
+    //     It adds no mode. csq_mode is left exactly as it was and the matching vanilla
+    //     state is restored on every exit path, because csq_ai_set_mode returns early
+    //     when the mode has not changed and would not put it back.
+    if (csq_care_step()) return;
+
+    // 1c. Idle life, second, because a companion that is bleeding is not smoking.
+    //
+    //     Like self-care it adds no mode and takes the whole frame when it returns
+    //     true -- and unlike self-care it does its own target scan while it holds the
+    //     instance, because the dispatch below (which normally scans) never runs. See
+    //     the note on csq_idle_step.
+    if (csq_idle_step()) return;
+
     var _distance = point_distance(x, y, _player.x, _player.y);
 
     // 2. Decide who is in charge this frame.
@@ -1166,7 +1385,20 @@ function csq_ai_step()
         }
     }
 
-    // 3. Belt and braces: while not fighting, stop the companion accumulating
+    // 3. Combat footwork, after the dispatch above rather than inside it.
+    //
+    //    It has to read human_state_now, and the value that matters is the one
+    //    vanilla settled on for THIS frame -- obj_csq_companion's Step calls
+    //    event_inherited() before csq_ai_step, so by here the selector has already
+    //    run, chosen its action and fired. Reading it from inside the engage branch
+    //    would work equally well today, but keeping it out here makes the producer
+    //    order explicit: footwork settles, then the callout at step 5 reacts to it.
+    //
+    //    Vanilla owns the trigger throughout. All this moves is the feet, and only
+    //    while vanilla is shooting and standing still to do it.
+    csq_combat_step();
+
+    // 4. Belt and braces: while not fighting, stop the companion accumulating
     //    awareness of the player. With correct faction reputation the player
     //    resolves as an ally and would never be shot, but a maxed alert_player
     //    can still make the player win the target slot in
@@ -1175,4 +1407,13 @@ function csq_ai_step()
     {
         alert_player = 0;
     }
+
+    // 5. Idle chatter, last of everything.
+    //
+    //    It is the only step in this function that cannot change what a companion
+    //    does -- it writes no vanilla variable and touches neither state nor mode --
+    //    so it goes where it can see the outcome of every decision above. Note that
+    //    the self-care early return at 1a means a companion binding a wound never
+    //    reaches this: it has already said its line.
+    csq_voice_step();
 }

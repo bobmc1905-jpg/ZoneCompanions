@@ -2,7 +2,8 @@
 //  Zone Companions  -  csq_ff
 // -----------------------------------------------------------------------------
 //  Friendly fire. Keeps companion rounds out of the player, player rounds out of
-//  companions, and grenades out of the fight entirely.
+//  companions, and companion rounds out of protected quest/service NPCs. Grenades
+//  are kept out of the fight entirely by default.
 //
 //  WHY THIS BLOCKS AT THE COLLISION STAGE, NOT THE DAMAGE STAGE
 //  The obvious alternative was to zero the damage in player_damage. That is worse
@@ -105,10 +106,18 @@ function csq_ff_block_bullet_on_player(_bullet, _player)
 }
 
 
-/// @func   csq_ff_block_bullet_on_companion(_bullet, _npc)
-/// @desc   Should this bullet be stopped from hitting a companion?
+/// @func   csq_ff_block_bullet_on_npc(_bullet, _npc)
+/// @desc   Should this bullet be stopped from hitting _npc?
 ///         Injected into bullet_can_collide_with_npc immediately after its own
 ///         instance_exists(arg1) guard, so _npc is known to exist.
+///
+///         QUEST/SERVICE NPC PROTECTION IS UNCONDITIONAL
+///         csq_ai_target_is_protected identifies traders and named story NPCs
+///         independently of faction. This protects them when another mod changes
+///         their faction, and also blocks the one-frame inherited-AI window before
+///         csq_ai_step can discard an invalid target. It applies only to rounds
+///         fired by companions; it never changes what the player or vanilla NPCs
+///         can damage.
 ///
 ///         COMPANION-ON-COMPANION IS ALREADY HANDLED BY VANILLA
 ///         bullet_can_collide_with_npc only returns true when
@@ -118,17 +127,25 @@ function csq_ff_block_bullet_on_player(_bullet, _player)
 ///         protection does not quietly depend on that -- if the faction setup
 ///         ever changes, this keeps holding.
 /// @return {Bool} true to block the collision
-function csq_ff_block_bullet_on_companion(_bullet, _npc)
+function csq_ff_block_bullet_on_npc(_bullet, _npc)
 {
     try
     {
+        var _shooter = csq_ff_bullet_shooter(_bullet);
+        if (_shooter == noone) return false;
+
+        // This has no config switch by design: a data mod changing Mr. Junk's
+        // faction must not be able to turn a permanent service NPC into a valid
+        // casualty. The predicate itself is conservative and fails closed.
+        if (csq_ff_is_companion(_shooter) && csq_ai_target_is_protected(_npc))
+        {
+            return true;
+        }
+
         // Most NPCs shot at are not companions; this exits on one comparison.
         if (_npc.object_index != obj_csq_companion) return false;
 
         if (!csq_cfg("ff_protect_companions")) return false;
-
-        var _shooter = csq_ff_bullet_shooter(_bullet);
-        if (_shooter == noone) return false;
 
         // Another companion (belt and braces, see above).
         if (csq_ff_is_companion(_shooter)) return true;

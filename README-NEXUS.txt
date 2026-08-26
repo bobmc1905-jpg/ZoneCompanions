@@ -5,23 +5,27 @@ A squad of NPC companions for ZERO Sievert. Hire them from a contact in the hub 
 
 The difference from a scripted follower mod is what's driving them. Zone Companions is built on GMLoader, so your companions inherit the game's own NPC brain — the same utility AI that makes bandits take cover, flank, shoot and reload, and the same A* navigation grid the base game paths on. When a firefight starts, this mod steps aside and lets vanilla's combat AI take over completely.
 
-[b]This mod contains no combat code at all.[/b] That's deliberate — it's why your squad fights like the game's own NPCs instead of like a script.
+[b]This mod contains no combat code at all.[/b] That's deliberate — it's why your squad fights like the game's own NPCs instead of like a script. The mod moves their feet; the game keeps the trigger.
 
-[b]Version 1.1.1[/b] — now with paid recruitment from an NPC in the hub, companion vision that reveals the map, and a config that updates itself.
+[b]Version 1.2.1[/b] — companions no longer fight like turrets. They advance while they shoot, spread out instead of stacking up, bandage themselves, talk, and take a smoke break when the zone goes quiet.
 
 
 [size=5][b]What your squad does[/b][/size]
 
 [list]
 [*][b]Fights with the game's real AI[/b] — cover, flanking, reloading, target selection. Not approximated.
+[*][b]Advances instead of standing still[/b] — companions push toward a target in committed moves while they shoot, angle to opposite sides so a squad spreads into an arc, and step apart instead of stacking on one spot. New in 1.2.0, and the biggest change to how a firefight looks.
 [*][b]Paths properly[/b] — they route around buildings and terrain on the game's own A* navigation grid instead of grinding into walls.
 [*][b]Sees for you[/b] — enemies, loot containers and the companions themselves are drawn when a companion can see them, even when you can't, and each companion's view cone clears the fog of war exactly like your own.
 [*][b]Holds a formation that covers where you're looking[/b] — they sit behind your heading, so they're out of your line of fire, but slide toward your cursor so they screen the direction you're actually watching.
 [*][b]Keeps up with you[/b] — follow speed is derived from your live current speed, so backpacks, hunter skills and the hub's run bonus can't leave them trailing behind.
 [*][b]Patches you up[/b] — a companion breaks off to heal you when you're hurt, and abandons a firefight to reach you when you're critical. Exactly one claims each wound, so the whole squad doesn't drop formation for the same injury. Charges refill every raid.
+[*][b]Patches itself up too[/b] — a badly hurt companion breaks contact, kneels with its weapon down and uses one of the bandages it brought with it. Nothing is ever taken from your inventory, and a hit while bandaging cancels it.
 [*][b]Won't shoot you, and you won't shoot them[/b] — protection runs both ways, enforced inside the game's own bullet-collision checks, so a blocked round isn't wasted and can still hit the enemy behind it.
 [*][b]Belongs to your character[/b] — the roster is saved in that character's save slot, carries injuries between raids, and is deleted with the save.
-[*][b]Behaves naturally when idle[/b] — they drift around their position while you stand still, and snap back into formation the moment you move.
+[*][b]Behaves naturally when idle[/b] — they drift around their position while you stand still, snap back into formation the moment you move, and on a long quiet stretch one of them will sit down for a smoke, a drink or a bite to eat.
+[*][b]Talks[/b] — the game's own NPC barks as a companion pushes or gets hurt, plus idle lines about the quiet, the weather, their gear and you. Only when the squad has genuinely had nothing to shoot at, and never two of them at once.
+[*][b]Isn't four copies of one NPC[/b] — decision timing, reaction delay and personal formation distance are offset per companion, and each carries a fixed temperament that nudges how eagerly it pushes and how often it talks. Tied to its squad slot, so the cautious one is the same one every raid.
 [*][b]Tells you what's going on[/b] — a squad panel shows each companion's name, health, remaining field dressings and current mode.
 [/list]
 
@@ -65,6 +69,8 @@ Optional white position pins mark companions through fog and walls, with an edge
 [/list]
 
 Priority is Healing → Fighting → Holding → Following. Fighting outranks Holding, so a companion told to hold position will still defend itself. Healing outranks Fighting only for a [i]critical[/i] wound; otherwise it finishes the firefight first.
+
+[b]Bandaging itself and taking a smoke break aren't modes.[/b] A companion doing either still reads as Following or Holding on the panel, because the mode is what you told it to do — not what it happens to be doing this second. Both interrupt instantly and hand the companion straight back to the mode it was already in.
 
 
 [size=5][b]Controls[/b][/size]
@@ -116,27 +122,41 @@ GMLoader makes a backup.win for you — keep your own copy of data.win too.
 
 There are two files, both beside your saves in %LOCALAPPDATA%\ZERO_Sievert.
 
-csq_config.ini is a [b]generated reference[/b]: all 97 settings, each with its current default and a comment explaining it. It's rewritten from scratch every launch, so it always matches the version you're running — which means a mod update can never leave you with a config file that quietly lacks its new settings. Don't edit this one.
+csq_config.ini is a [b]generated reference[/b]: all 146 settings, each with its current default and a comment explaining it. It's rewritten from scratch every launch, so it always matches the version you're running — which means a mod update can never leave you with a config file that quietly lacks its new settings. Don't edit this one.
 
 csq_config_user.ini is [b]yours[/b]. Put in it only the lines you want to change, save, and restart the game — config is read once at boot. The mod never overwrites this file.
 
-[b]Nothing to do when you update.[/b] Coming from 1.0.0, your old settings are moved into the new user file automatically on the first launch. And if you edit the generated file out of habit, the mod moves those lines into your user file for you, applies them that same launch, and says so in the log. Nothing is lost.
+[b]Nothing to do when you update.[/b] Coming from 1.0.0 or 1.1.x, your old settings are moved into the new user file automatically on the first launch. And if you edit the generated file out of habit, the mod moves those lines into your user file for you, applies them that same launch, and says so in the log. Nothing is lost.
 
-The eleven sections at a glance:
+The fifteen sections at a glance:
 
 [list]
 [*][b]debug[/b] — logging verbosity and the debug overlay (off by default)
 [*][b]squad[/b] — squad size, the NPC preset used, spawning, toughness
 [*][b]follow[/b] — formation shape, follow distances and speeds, teleport rescue
 [*][b]roam[/b] — idle drift around the formation slot
-[*][b]combat[/b] — engagement range, aggression, faction standings
+[*][b]combat[/b] — engagement range, faction standings, and how companions advance, spread and reposition in a firefight
 [*][b]ff[/b] — friendly fire in both directions, grenade disarming
 [*][b]medic[/b] — whether and when companions heal you, and how much
 [*][b]hud[/b] — squad panel position, size and contents
 [*][b]reveal[/b] — what your companions' vision reveals, and how strongly
 [*][b]recruit[/b] — the recruiter NPC, the three tiers, their prices, menu keys
+[*][b]callouts[/b] — when companions speak, how often, and how far away you can hear them
+[*][b]selfcare[/b] — whether wounded companions bandage themselves, and at what cost
+[*][b]idle_life[/b] — smoke, drink and eat breaks during long quiet stretches
+[*][b]desync[/b] — per-companion timing and temperament, so a squad isn't one brain
 [*][b]input[/b] — the six keybinds
 [/list]
+
+[b]Don't want the 1.2.0 behaviours?[/b] Each is behind one switch, and with all five off the mod behaves exactly as 1.1.1 did. Put these in csq_config_user.ini:
+
+push_enabled = false
+idle_callouts_enabled = false
+selfcare_enabled = false
+idle_life_enabled = false
+desync_enabled = false
+
+That's also the fastest way to find a misbehaving companion: turn them off one at a time until the behaviour stops.
 
 csq_ is the mod's internal namespace prefix. It shows up in the config filename, the log filename and every log line. It's kept short deliberately: GMLoader loads every mod into one shared flat folder, so a short unique prefix is what stops two mods colliding.
 
@@ -161,6 +181,9 @@ Full reference, including tuning recipes for "they keep falling behind" and "I w
 [*]Companions carry no inventory and can't be given gear. They spawn with whatever their preset's weapon setup provides. Medic charges are an abstract per-raid count, not an item — healing consumes nothing from anyone's bag.
 [*]Companions don't throw grenades while that's switched on in the config, which it is by default. This is blunt on purpose: grenade damage in this game has no faction check of any kind, so there's no way to let them throw and keep you safe.
 [*]The medic doesn't treat wounds. It restores health and stops bleeding, exactly like an NPC medic's dialogue heal. Wounds need medication, and the mod deliberately never touches that stat.
+[*]Self-care bandages are an abstract per-raid count too. A companion patching itself up consumes nothing from anyone's inventory, and can't be resupplied mid-raid.
+[*]Pushing can walk a companion somewhere you wouldn't have sent it. It's leashed to you and stops short of the target, but the base game's own cover selection isn't consulted — a companion advances toward a spot, not into cover. Tighten push_max_from_player and push_stop_distance if they're dying more than you like, or set push_enabled = false.
+[*]Idle-life animations are purely cosmetic. No item is consumed and no health or stamina is gained. They exist so a quiet stretch doesn't look like four mannequins standing in a field.
 [/list]
 
 
@@ -174,7 +197,7 @@ Set log_level = 3 and debug_enabled = true in csq_config_user.ini, restart, repr
 [size=5][b]Uninstalling[/b][/size]
 
 [list=1]
-[*]Delete this mod's 21 files from GMLoader's mods tree.
+[*]Delete this mod's 26 files from GMLoader's mods tree.
 [*]Re-run GMLoader to rebuild a clean data.win from backup.win.
 [/list]
 

@@ -143,7 +143,7 @@ function csq_persist_probe()
 /// @desc   Reduce the roster to plain data. Live instance ids are deliberately
 ///         dropped -- they are meaningless in the next session, and JSON cannot
 ///         represent them anyway.
-/// @return {Array} array of {preset, name, hp, hp_mult}
+/// @return {Array} array of {preset, name, hp, hp_mult, care_charges}
 function csq_persist_serialise()
 {
     csq_squad_init();
@@ -167,7 +167,12 @@ function csq_persist_serialise()
             // Carry the tier toughness so a Veteran reloaded from a save is still a
             // Veteran. -1 for a legacy entry that predates tiers, which loads back
             // to the configured hp_multiplier.
-            hp_mult: csq_struct_get(_entry, "hp_mult", -1)
+            hp_mult: csq_struct_get(_entry, "hp_mult", -1),
+
+            // Bandages left this raid. Saved for the same reason hp is: quitting mid
+            // raid and coming back should not hand the squad free supplies. Refilled
+            // at the start of the next raid entry, not here.
+            care_charges: csq_care_charges_entry(_entry)
         });
     }
 
@@ -228,7 +233,20 @@ function csq_persist_deserialise(_data)
         var _hp_mult = csq_struct_get(_record, "hp_mult", -1);
         if (!is_numeric(_hp_mult)) _hp_mult = -1;
 
-        array_push(_restored, csq_squad_make_entry(_preset, _name, _hp, _hp_mult));
+        var _entry = csq_squad_make_entry(_preset, _name, _hp, _hp_mult);
+
+        // Bandages, absent from every save written before self-care existed. A
+        // missing or nonsense value is left absent, and csq_care_charges_entry reads
+        // an absent field as a full complement -- the forgiving direction, and the
+        // same one the medic charges take.
+        var _care = csq_struct_get(_record, "care_charges", -1);
+
+        if (is_numeric(_care) && _care >= 0)
+        {
+            _entry.care_charges = min(floor(_care), csq_care_charges_max());
+        }
+
+        array_push(_restored, _entry);
     }
 
     global.csq_squad = _restored;

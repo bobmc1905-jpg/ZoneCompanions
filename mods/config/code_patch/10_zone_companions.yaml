@@ -148,7 +148,7 @@ gml_GlobalScript_bullet_can_collide_with_npc:
         if (arg1.can_be_damaged)
 
     code: |-
-        if (csq_ff_block_bullet_on_companion(arg0, arg1)) { return false; }
+        if (csq_ff_block_bullet_on_npc(arg0, arg1)) { return false; }
 
 
 # --- 8. Fog of war: the squad's own vision -------------------------------------

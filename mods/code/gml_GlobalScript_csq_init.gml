@@ -47,7 +47,7 @@
 /// @func   csq_mod_name()
 /// @desc   Identity, reported in the log header and on error.
 function csq_mod_name()    { return "Zone Companions"; }
-function csq_mod_version() { return "1.1.1"; }
+function csq_mod_version() { return "1.2.1"; }
 
 
 /// @func   csq_boot()
@@ -99,6 +99,12 @@ function csq_boot()
         global.csq_medic_id       = noone;
         global.csq_heal_refilled  = false;
 
+        // The squad-wide callout brake, in current_time milliseconds. 0 reads as
+        // "nobody has spoken yet", which is exactly the right starting state -- see
+        // csq_voice_can_speak. Lives on the process rather than the raid because
+        // current_time is monotonic across map loads anyway.
+        global.csq_last_callout_time = 0;
+
         csq_log_info("boot: initialised, max " + string(csq_squad_max()) + " companion(s)");
         csq_log_info("boot: keys - recruit " + string(csq_input_key("key_recruit")) +
                      ", dismiss " + string(csq_input_key("key_dismiss")) +
@@ -134,6 +140,15 @@ function csq_on_map_load()
         // registries from the save -- so the companion faction has to be
         // re-registered on every load, not just once.
         csq_faction_register();
+
+        // Same reason, different table: lista_npc_text() re-creates five of the nine
+        // bark arrays with array_create(324, ...) every time obj_controller is made,
+        // so this mod's callout ids have to be written back on every map load or the
+        // first companion to speak indexes past the end of an array.
+        //
+        // Unconditional, even with idle_callouts_enabled off -- five unused entries
+        // are invisible, an unregistered id is a crash. See csq_voice's header.
+        csq_voice_register();
 
         // The save database is only reliably loaded by this point if a character
         // is actually in play; csq_persist handles that itself and no-ops
@@ -247,7 +262,8 @@ function csq_tick_deferred_spawn()
 
 
 /// @func   csq_tick_refill_heal_charges()
-/// @desc   Refill every companion's medic charges once per raid entry.
+/// @desc   Refill every companion's medic charges -- and its own bandages -- once per
+///         raid entry.
 ///
 ///         WHY THIS IS NOT DONE IN csq_on_map_load
 ///         That event is obj_controller_Create_0, which fires while the map is
@@ -267,6 +283,11 @@ function csq_tick_refill_heal_charges()
 
     global.csq_heal_refilled = true;
     csq_squad_refill_heal_charges();
+
+    // Self-care bandages ride the same gate rather than getting one of their own:
+    // both are "per raid, per companion", and both would be wrong for exactly the
+    // same reasons if they were refilled anywhere else.
+    csq_care_refill_charges();
 }
 
 

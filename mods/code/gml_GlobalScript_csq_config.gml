@@ -26,10 +26,11 @@
 //  A single file cannot be both. Written-once-if-missing is the only safe way to
 //  treat a file holding the player's edits, but it also means a mod update can
 //  never reach it: settings added later are simply absent, and defaults changed
-//  later are still documented wrongly. 1.0.0 shipped 61 settings and 1.1.0 has
-//  97, so an upgrading player would have seen none of the 36 new ones. Splitting
-//  them makes the reference disposable -- always regenerated, therefore always
-//  correct -- and the override file tiny, hand-written and update-proof.
+//  later are still documented wrongly. 1.0.0 shipped 61 settings, 1.1.0 had 97 and
+//  1.2.0 has 146, so a player upgrading from 1.0.0 would have seen none of the 85
+//  added since. Splitting them makes the reference disposable -- always regenerated,
+//  therefore always correct -- and the override file tiny, hand-written and
+//  update-proof.
 //
 //  The transition is automatic in both directions. On the first launch after an
 //  update there is no user file, so the old single config's non-default values are
@@ -173,6 +174,43 @@ function csq_config_spec()
           comment: "Reputation written for allies. >600 counts as ally in-game." },
         { section: "combat", key: "rep_hostile", type: "real", def: 0,
           comment: "Reputation written for enemies. <250 counts as hostile in-game." },
+
+        // Combat craft. Vanilla's NPC brain has no action that closes distance once
+        // the target is already inside the weapon's effective band: action 29
+        // (Advance) is gated on range_type != 0 and action 11 (Shoot) on
+        // range_type == 0, and 11 wins the priority queue. So an NPC in range stops
+        // dead and shuffles inside a 16px box. Everything below is the mod moving
+        // the feet while vanilla keeps the trigger.
+        { section: "combat", key: "push_enabled", type: "bool", def: true,
+          comment: "Companions advance on a target in committed moves while they shoot, instead of rooting to the spot the moment it comes into range. Turn off for exactly vanilla footwork." },
+        { section: "combat", key: "push_min_distance", type: "real", def: 220,
+          comment: "A companion only pushes when the target is at least this far away, in pixels. Below it they are already close enough and vanilla's own shuffle is fine. An aggressive companion closes from a little further out, a cautious one waits until the gap is larger." },
+        { section: "combat", key: "push_stop_distance", type: "real", def: 90,
+          comment: "A push never aims closer than this to the target, in pixels. This is the line between 'advancing' and 'walking into a shotgun'." },
+        { section: "combat", key: "push_step", type: "real", def: 48,
+          comment: "How far one committed move carries the companion, in pixels. Small steps read as bounding from cover to cover; large ones read as a charge." },
+        { section: "combat", key: "push_commit_frames", type: "real", def: 45,
+          comment: "How long a companion sticks to a move once it has started it, in frames (60 = 1 second). This is the setting that makes pushing look human: an NPC that re-decides every frame twitches, one that commits looks like it meant it. Lower it for jumpier footwork, raise it for a more determined advance." },
+        { section: "combat", key: "push_cooldown_frames", type: "real", def: 90,
+          comment: "Frames of standing and shooting after a push finishes, before another may start. Pushes back to back would be a sprint; this is what turns them into advance, fire, advance." },
+        { section: "combat", key: "push_speed_mult", type: "real", def: 1.35,
+          comment: "Movement speed during a push, as a multiple of the preset's alerted speed. Vanilla walks a shooting NPC at its idle speed, which is why an advance without this looks like a stroll." },
+        { section: "combat", key: "push_max_from_player", type: "real", def: 260,
+          comment: "A companion never pushes to a spot further than this from you, in pixels. The leash that stops an advance turning into a solo assault across the map." },
+        { section: "combat", key: "push_require_los", type: "bool", def: true,
+          comment: "Only push when the companion can actually see the target. Off means they will also close on a target they have lost behind cover." },
+        { section: "combat", key: "flank_bias_degrees", type: "real", def: 35,
+          comment: "How far off the straight line to the target each companion angles its advance, in degrees. Alternating slots lean opposite ways, so a squad spreads into an arc instead of queueing up single file. 0 makes everyone charge straight in." },
+        { section: "combat", key: "spread_enabled", type: "bool", def: true,
+          comment: "Companions standing on top of each other in a firefight sidestep apart. Two of them in one spot is one grenade, and it is the single clearest tell that a squad is running one brain. Sits under push_enabled: turning that off turns off all combat footwork." },
+        { section: "combat", key: "spread_min_distance", type: "real", def: 40,
+          comment: "How close another companion has to be before this one moves aside, in pixels. Roughly two body widths." },
+        { section: "combat", key: "spread_step", type: "real", def: 36,
+          comment: "How far a companion sidesteps to break up a stack, in pixels. Always across the line to the target, never along it, so nobody gives up ground or walks into the open to do it." },
+        { section: "combat", key: "reposition_after_frames", type: "real", def: 240,
+          comment: "Frames of shooting from the same spot before a companion shifts position anyway, at 60 a second. This is the anti-turret backstop: it fires even when the target is already close enough that no advance is wanted, so a firefight never has anyone standing perfectly still for ten seconds. 0 switches it off." },
+        { section: "combat", key: "reposition_step", type: "real", def: 56,
+          comment: "How far that shift carries, in pixels. Side chosen at random each time, so a blocked direction fixes itself on the next attempt." },
 
         // ---- ff ----------------------------------------------------------
         // Friendly fire. The two bullet settings are enforced inside vanilla's own
@@ -372,6 +410,94 @@ function csq_config_spec()
         { section: "recruit", key: "recruit_key_back", type: "real", def: 8,
           comment: "Menu: step back, and close from the first step. Default Backspace (8)." },
 
+        // ---- callouts ----------------------------------------------------
+        // Spoken lines, drawn by vanilla's own obj_npc_draw_text through
+        // global.t_npc_text. Registration happens on every map load, not at boot,
+        // because vanilla's lista_npc_text() re-creates five of the nine parallel
+        // arrays from scratch each time obj_controller is created.
+        { section: "callouts", key: "idle_callouts_enabled", type: "bool", def: true,
+          comment: "Companions occasionally say something out loud when nothing is happening. Uses the game's own NPC speech bubbles." },
+        { section: "callouts", key: "push_callout_chance", type: "real", def: 35,
+          comment: "Percent chance a companion calls out as it starts a push. Uses the game's existing 'I'm pushing' lines, so nothing has to be registered for it. 0 turns push callouts off; the rest of pushing is unaffected." },
+        { section: "callouts", key: "selfcare_callout_enabled", type: "bool", def: true,
+          comment: "A companion says something as it starts bandaging itself. Uses the game's existing 'I'm hurt' line, so it is a voice you have already heard in the zone." },
+        { section: "callouts", key: "idle_callout_min_seconds", type: "real", def: 40,
+          comment: "Shortest wait between one companion's idle lines, in seconds. The actual wait is rolled between this and the maximum, per companion, so two of them never speak on a schedule." },
+        { section: "callouts", key: "idle_callout_max_seconds", type: "real", def: 110,
+          comment: "Longest wait between one companion's idle lines, in seconds. Raise both numbers if the squad talks more than you want; lower them if the walk between towns feels empty." },
+        { section: "callouts", key: "idle_callout_radius", type: "real", def: 220,
+          comment: "How close to you a companion has to be to bother saying anything, in pixels. A line from someone off screen is noise, not atmosphere." },
+        { section: "callouts", key: "idle_callout_needs_calm_seconds", type: "real", def: 12,
+          comment: "Seconds of no enemy contact before idle chatter starts again. This is what stops a companion making small talk over the sound of the last body hitting the ground." },
+        { section: "callouts", key: "callout_squad_cooldown_seconds", type: "real", def: 8,
+          comment: "Seconds after any companion speaks before another may. Squad-wide, so four of them cannot talk over each other." },
+        { section: "callouts", key: "callout_id_base", type: "real", def: 800,
+          comment: "Where this mod's own speech lines are registered in the game's text table. The game's own lines stop at 321. Only worth changing if another mod happens to use the same range." },
+        { section: "callouts", key: "callout_needs_sight", type: "bool", def: true,
+          comment: "Hide a speech bubble when a wall is between you and the speaker, the way the game's own NPC lines behave. Off makes companions audible through walls." },
+        { section: "callouts", key: "callout_text_timer", type: "real", def: 130,
+          comment: "How long one of this mod's lines stays on screen, in frames. 130 is what the game uses for its own NPC speech." },
+
+        // ---- selfcare ----------------------------------------------------
+        // A wounded companion patching itself up. This is first aid only: it never
+        // loots, never opens a container and never touches your inventory.
+        { section: "selfcare", key: "selfcare_enabled", type: "bool", def: true,
+          comment: "Badly hurt companions break contact and bandage themselves, using their own limited supplies." },
+        { section: "selfcare", key: "selfcare_hp_threshold", type: "real", def: 0.45,
+          comment: "How badly hurt is badly hurt, as a fraction of the companion's own maximum health. 0.45 means it starts thinking about bandages below 45 percent. Scales with difficulty, because the maximum does." },
+        { section: "selfcare", key: "selfcare_heal_fraction", type: "real", def: 0.25,
+          comment: "How much of that maximum one bandage gives back. Deliberately less than the threshold: first aid buys a companion the rest of the fight, it does not reset it." },
+        { section: "selfcare", key: "selfcare_bind_seconds", type: "real", def: 3.0,
+          comment: "Seconds spent standing still with the weapon down. This is the cost of the heal, and it is meant to be felt -- a companion caught bandaging is a companion not shooting." },
+        { section: "selfcare", key: "selfcare_cooldown_seconds", type: "real", def: 60,
+          comment: "Seconds before the same companion will bandage again, even with supplies left." },
+        { section: "selfcare", key: "selfcare_charges", type: "real", def: 2,
+          comment: "Bandages each companion carries per raid. Nothing is taken from your inventory and nothing is looted; this is what they brought with them. 0 turns the healing off while leaving everything else about the behaviour intact." },
+        { section: "selfcare", key: "selfcare_require_no_target", type: "bool", def: true,
+          comment: "Never bandage while it still has a live enemy of its own. On is the sane setting; off lets a companion try first aid mid-firefight, which is as bad an idea for them as it is for you." },
+        { section: "selfcare", key: "selfcare_break_contact", type: "bool", def: true,
+          comment: "Walk back toward you before starting. Only does visible work when there is something to walk away from -- see selfcare_require_no_target." },
+        { section: "selfcare", key: "selfcare_interrupt_on_hit", type: "bool", def: true,
+          comment: "Taking any damage while bandaging aborts it. No bandage is spent and no cooldown starts, so a companion interrupted twice will still try a third time." },
+
+        // ---- idle_life ---------------------------------------------------
+        // Eating, drinking and smoking, driven through the vanilla obj_arms_* props.
+        // Each prop's own Step event destroys it as soon as the companion leaves the
+        // matching human_state_now, so nothing here can leak an object.
+        { section: "idle_life", key: "idle_life_enabled", type: "bool", def: true,
+          comment: "During long quiet stretches a companion may sit down for a smoke, a drink or a bite. Interrupted instantly by contact." },
+        { section: "idle_life", key: "idle_life_min_seconds", type: "real", def: 25,
+          comment: "Shortest an idle animation lasts, in seconds." },
+        { section: "idle_life", key: "idle_life_max_seconds", type: "real", def: 90,
+          comment: "Longest an idle animation lasts, in seconds. A companion has to earn another calm stretch before it can start a second one." },
+        { section: "idle_life", key: "idle_life_calm_seconds", type: "real", def: 25,
+          comment: "How long a companion must have had nothing to shoot at before it will start. Deliberately longer than idle_callout_needs_calm_seconds: lighting a cigarette in the zone claims more safety than saying something does." },
+        { section: "idle_life", key: "idle_life_max_concurrent", type: "real", def: 1,
+          comment: "How many companions may be animating at once, across the whole squad. 1 means you see one of them take a break, not all of them." },
+        { section: "idle_life", key: "idle_life_smoke_weight", type: "real", def: 40,
+          comment: "Relative chance of a cigarette. The three weights are compared against each other, so any scale works." },
+        { section: "idle_life", key: "idle_life_drink_weight", type: "real", def: 30,
+          comment: "Relative chance of a drink." },
+        { section: "idle_life", key: "idle_life_eat_weight", type: "real", def: 30,
+          comment: "Relative chance of a bite to eat. Set all three to 0 to leave the feature on but silent." },
+
+        // ---- desync ------------------------------------------------------
+        // Everything that stops a squad looking like one object. Without it, four
+        // companions run the same code on the same frame with the same numbers and
+        // move as a single rigid body.
+        { section: "desync", key: "desync_enabled", type: "bool", def: true,
+          comment: "Give each companion its own timing, reaction delay and follow distance, so a squad stops moving in lockstep." },
+        { section: "desync", key: "desync_seed_from_slot", type: "bool", def: true,
+          comment: "Derive each companion's personal numbers from its squad slot instead of at random, so the same slot behaves the same way every raid. Off = fresh random every spawn." },
+        { section: "desync", key: "desync_tick_jitter", type: "real", def: 3,
+          comment: "Frames of spread in when companions take their decisions. Do not raise above 3: vanilla's own think interval is short, and more than this shows up as visible hesitation." },
+        { section: "desync", key: "desync_reaction_jitter_frames", type: "real", def: 6,
+          comment: "Extra frames, up to this many, that one companion holds a committed move longer than another. Pure variation; it does not slow anyone's shooting." },
+        { section: "desync", key: "desync_follow_distance_jitter", type: "real", def: 8,
+          comment: "Pixels of personal offset added to a companion's formation distance, so they do not all sit at the same radius." },
+        { section: "desync", key: "temperament_enabled", type: "bool", def: true,
+          comment: "Each companion gets a fixed personality score that nudges how eagerly it pushes and how often it talks. Off = every companion behaves identically." },
+
         // ---- input -------------------------------------------------------
         // Defaults are function keys so they cannot collide with the game's
         // movement/inventory bindings. Values are GameMaker virtual key codes:
@@ -424,8 +550,8 @@ function csq_config_filename()
 ///         setting added after the file was created is missing from it, every
 ///         default changed since is still described wrongly, and the player has no
 ///         way to find out except by reading CONFIGURATION.md. 1.0.0 shipped 61
-///         settings and 1.1.0 has 97; an upgrading player would have seen none of
-///         the 36 new ones.
+///         settings, 1.1.0 had 97 and 1.2.0 has 146; a player upgrading from 1.0.0
+///         would have seen none of the 85 added since.
 ///
 ///         Splitting the file makes both halves easy: the reference is disposable,
 ///         so it can be regenerated unconditionally and is always correct, and the

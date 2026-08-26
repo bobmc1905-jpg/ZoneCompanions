@@ -290,6 +290,37 @@ function csq_clamp_int(_value, _min, _max)
 }
 
 
+/// @func   csq_seconds_to_frames(_seconds)
+/// @desc   Turn a duration a player typed in seconds into a whole number of frames.
+///
+///         room_speed is vanilla's own way of doing this -- bullet_hit_player:128
+///         and player_action_unjam:9 both read a "_seconds" field out of the skill
+///         data and multiply it by room_speed. Wrapped in a try because a mod is not
+///         entitled to assume the builtin resolves in whatever GameMaker runtime
+///         GMLoader hands the code to; 60 is what this game actually runs at, so the
+///         fallback is the same answer by another route.
+///
+///         Floored at 1: a duration a player set to something tiny should be one
+///         frame of the behaviour, not a behaviour that never happens.
+/// @param  {Real} _seconds
+/// @return {Real} frames
+function csq_seconds_to_frames(_seconds)
+{
+    var _fps = 60;
+
+    try
+    {
+        if (is_real(room_speed) && room_speed > 0) _fps = room_speed;
+    }
+    catch (_err)
+    {
+        _fps = 60;
+    }
+
+    return max(1, floor(_seconds * _fps));
+}
+
+
 /// @func   csq_world_to_gui(_wx, _wy)
 /// @desc   Room coordinates to the 480x270 GUI space every draw in this mod uses.
 ///         Returns { ok, x, y }; ok is false only when the camera is unreadable,

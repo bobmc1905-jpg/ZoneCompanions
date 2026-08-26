@@ -18,8 +18,17 @@
 //  fails. CleanUp also fires at room end and game end, when globals may already
 //  have been torn down, which is why csq_squad_notify_cleanup swallows its own
 //  errors instead of reporting them.
+//
+//  THE obj_arms_* TEARDOWN IS BELT AND BRACES
+//  Each prop's own Step already begins `if (!instance_exists(linked_id))
+//  instance_destroy();`, so an orphan cleans itself up on its next frame regardless.
+//  This closes the one-frame window in between, during which the prop would still be
+//  drawn at a dead companion's last position -- and it costs one loop over a family
+//  of objects that almost never has any members.
 // =============================================================================
 
 event_inherited();
 
 csq_squad_notify_cleanup(id);
+
+csq_idle_destroy_props(id);

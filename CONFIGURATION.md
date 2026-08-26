@@ -35,16 +35,18 @@ A single file cannot be both up to date and safe to keep your edits in. The old
 one-file version was only written when it was missing, which is the only way to
 avoid clobbering your settings — but it also meant a mod update could never reach
 it. Every setting added after your file was created was simply absent from it, and
-every default changed since was still described wrongly. 1.0.0 had 61 settings and
-1.1.0 has 97, so an upgrading player would have seen none of the 36 new ones.
+every default changed since was still described wrongly. 1.0.0 had 61 settings,
+1.1.0 had 97 and 1.2.0 has 146, so a player upgrading from 1.0.0 would have seen
+none of the 85 added since.
 
 Split in two, the reference is disposable and therefore always correct, and your
 overrides are a short list you wrote yourself that no update touches.
 
 ### Nothing to do when you update
 
-- **Coming from 1.0.0:** your old `csq_config.ini` settings are moved into a new
-  `csq_config_user.ini` automatically on the first launch. Nothing to re-type.
+- **Coming from 1.0.0 or 1.1.x:** your old `csq_config.ini` settings are moved into a
+  new `csq_config_user.ini` automatically on the first launch. Nothing to re-type,
+  and every setting added since appears in the regenerated reference.
 - **If you edit `csq_config.ini` out of habit:** the mod notices, moves those lines
   into your user file for you, applies them immediately, and says so in
   `logs/csq_log.txt`. Nothing is lost.
@@ -193,7 +195,9 @@ Companions drift around their formation slot instead of standing to attention.
 
 ---
 
-## `[combat]` — 7 settings
+## `[combat]` — 22 settings
+
+### Engagement — 7 settings
 
 | Setting | Default | What it does |
 |---|---|---|
@@ -209,6 +213,42 @@ Companions drift around their formation slot instead of standing to attention.
 > value on the wrong side of them is reported in the log rather than silently
 > producing companions that will not fight.
 
+### Pushing — 10 settings
+
+Companions used to hold position the moment a target entered their weapon's
+effective range. The base game's NPC brain has no action that closes distance once
+it is already in range, so they shuffled inside a 16-pixel box and fired. These
+settings are the fix: a companion picks a spot closer to the target, commits to
+walking there while it shoots, then holds and fires before deciding again.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `push_enabled` | `true` | Companions advance on a target in committed moves while they shoot, instead of rooting to the spot the moment it comes into range. Turn off for exactly vanilla footwork. **Master switch for everything in this subsection and the next.** |
+| `push_min_distance` | `220` | A companion only pushes when the target is at least this far away, in pixels. Below it they are already close enough and vanilla's own shuffle is fine. |
+| `push_stop_distance` | `90` | A push never aims closer than this to the target, in pixels. The line between "advancing" and "walking into a shotgun". |
+| `push_step` | `48` | How far one committed move carries the companion, in pixels. Small steps read as bounding from cover to cover; large ones read as a charge. |
+| `push_commit_frames` | `45` | How long a companion sticks to a move once it has started it, in frames (60 = 1 second). This is the setting that makes pushing look human: an NPC that re-decides every frame twitches, one that commits looks like it meant it. |
+| `push_cooldown_frames` | `90` | Frames of standing and shooting after a push finishes, before another may start. Pushes back to back would be a sprint; this is what turns them into advance, fire, advance. |
+| `push_speed_mult` | `1.35` | Movement speed during a push, as a multiple of the preset's alerted speed. Vanilla walks a shooting NPC at its *idle* speed, which is why an advance without this looks like a stroll. |
+| `push_max_from_player` | `260` | A companion never pushes to a spot further than this from you, in pixels. The leash that stops an advance turning into a solo assault across the map. |
+| `push_require_los` | `true` | Only push when the companion can actually see the target. Off means they will also close on a target they have lost behind cover. |
+| `flank_bias_degrees` | `35` | How far off the straight line to the target each companion angles its advance, in degrees. Alternating slots lean opposite ways, so a squad spreads into an arc instead of queueing up single file. `0` makes everyone charge straight in. |
+
+### Not stacking, not standing still — 5 settings
+
+| Setting | Default | What it does |
+|---|---|---|
+| `spread_enabled` | `true` | Companions standing on top of each other in a firefight sidestep apart. Two of them in one spot is one grenade, and it is the single clearest tell that a squad is running one brain. Sits under `push_enabled`. |
+| `spread_min_distance` | `40` | How close another companion has to be before this one moves aside, in pixels. Roughly two body widths. |
+| `spread_step` | `36` | How far a companion sidesteps to break up a stack, in pixels. Always *across* the line to the target, never along it, so nobody gives up ground or walks into the open to do it. |
+| `reposition_after_frames` | `240` | Frames of shooting from the same spot before a companion shifts position anyway, at 60 a second. The anti-turret backstop: it fires even when the target is already close enough that no advance is wanted, so a firefight never has anyone standing perfectly still for ten seconds. `0` switches it off. |
+| `reposition_step` | `56` | How far that shift carries, in pixels. Side chosen at random each time, so a blocked direction fixes itself on the next attempt. |
+
+> **All of this stops at the trigger.** The mod moves a companion's feet; the base
+> game still decides when to fire, what to fire at, when to reload and when to take
+> cover. Nothing here makes a companion shoot better or harder — it makes them stop
+> behaving like a turret bolted to the floor.
+
 ---
 
 ## `[ff]` — 3 settings
@@ -216,6 +256,13 @@ Companions drift around their formation slot instead of standing to attention.
 Friendly fire. The two bullet settings are enforced inside vanilla's **own**
 collision predicates, which means a blocked round is not consumed — it passes
 through and can still hit the enemy behind.
+
+Companion bullets are also always blocked from permanent quest and service NPCs.
+This is not configurable: faction-overhaul mods can change a trader's faction,
+but that must not make the trader a valid squad target or casualty. The safeguard
+covers every NPC with a real `trader_id`, vanilla's two save-critical traders
+(Mr. Junk and Igor), named quest/service NPCs, and scripted Player/All Friend NPCs.
+It deliberately does not protect quest kill targets.
 
 | Setting | Default | What it does |
 |---|---|---|
@@ -400,6 +447,109 @@ that action.
 
 ---
 
+## `[callouts]` — 11 settings
+
+Companions talk, using the game's own NPC speech bubbles. Three of the lines they
+use are the base game's own — the "pushing", "I'm hurt" and "spotted you" barks NPCs
+already have — so those cost nothing and sound exactly like the zone already sounds.
+The idle chatter is this mod's own text, registered into the game's text table at
+`callout_id_base`.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `idle_callouts_enabled` | `true` | Companions occasionally say something out loud when nothing is happening. **Master switch for the idle chatter only** — the two barks below are separate. |
+| `push_callout_chance` | `35` | Percent chance a companion calls out as it starts a push. Uses the game's existing "I'm pushing" line, so nothing has to be registered for it. `0` turns push callouts off; the rest of pushing is unaffected. |
+| `selfcare_callout_enabled` | `true` | A companion says something as it starts bandaging itself. Uses the game's existing "I'm hurt" line, so it is a voice you have already heard in the zone. |
+| `idle_callout_min_seconds` | `40` | Shortest wait between one companion's idle lines, in seconds. The actual wait is rolled between this and the maximum, per companion, so two of them never speak on a schedule. |
+| `idle_callout_max_seconds` | `110` | Longest wait between one companion's idle lines, in seconds. Raise both numbers if the squad talks more than you want; lower them if the walk between towns feels empty. |
+| `idle_callout_radius` | `220` | How close to you a companion has to be to bother saying anything, in pixels. A line from someone off screen is noise, not atmosphere. |
+| `idle_callout_needs_calm_seconds` | `12` | Seconds of no enemy contact before idle chatter starts again. This is what stops a companion making small talk over the sound of the last body hitting the ground. |
+| `callout_squad_cooldown_seconds` | `8` | Seconds after any companion speaks before another may. Squad-wide, so four of them cannot talk over each other. Also applies to the push bark. |
+| `callout_id_base` | `800` | Where this mod's own speech lines are registered in the game's text table. The game's own lines stop at 321. Only worth changing if another mod happens to use the same range. |
+| `callout_needs_sight` | `true` | Hide a speech bubble when a wall is between you and the speaker, the way the game's own NPC lines behave. Off makes companions audible through walls. |
+| `callout_text_timer` | `130` | How long one of this mod's lines stays on screen, in frames. `130` is what the game uses for its own NPC speech. |
+
+> **The squad cooldown does not gate the "I'm hurt" line.** A companion announcing
+> that it is bandaging is information you need, not atmosphere, so it is never held
+> back behind another companion's small talk.
+
+---
+
+## `[selfcare]` — 9 settings
+
+A wounded companion patches itself up. First aid only: no looting, no containers,
+no corpses, and **nothing is ever taken from your inventory**. The bandages are what
+that companion brought with it, they are counted per raid, and they are carried
+through a mid-raid quit on the roster.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `selfcare_enabled` | `true` | Badly hurt companions break contact and bandage themselves, using their own limited supplies. **Master switch.** |
+| `selfcare_hp_threshold` | `0.45` | How badly hurt is badly hurt, as a fraction of the companion's own maximum health. `0.45` means it starts thinking about bandages below 45 percent. Scales with difficulty, because the maximum does. |
+| `selfcare_heal_fraction` | `0.25` | How much of that maximum one bandage gives back. Deliberately less than the threshold: first aid buys a companion the rest of the fight, it does not reset it. |
+| `selfcare_bind_seconds` | `3.0` | Seconds spent standing still with the weapon down. This is the cost of the heal, and it is meant to be felt — a companion caught bandaging is a companion not shooting. |
+| `selfcare_cooldown_seconds` | `60` | Seconds before the same companion will bandage again, even with supplies left. |
+| `selfcare_charges` | `2` | Bandages each companion carries per raid. Nothing is taken from your inventory and nothing is looted; this is what they brought with them. `0` turns the healing off while leaving everything else about the behaviour intact. |
+| `selfcare_require_no_target` | `true` | Never bandage while it still has a live enemy of its own. On is the sane setting; off lets a companion try first aid mid-firefight, which is as bad an idea for them as it is for you. |
+| `selfcare_break_contact` | `true` | Walk back toward you before starting. Only does visible work when there is something to walk away from — see `selfcare_require_no_target`. |
+| `selfcare_interrupt_on_hit` | `true` | Taking any damage while bandaging aborts it. No bandage is spent and no cooldown starts, so a companion interrupted twice will still try a third time. |
+
+> **Your life outranks theirs.** A companion on its way to heal *you* will not stop
+> to bandage itself, and bandages refill at the start of every raid — the same
+> timing, and for the same reason, as the field-medic charges in `[medic]`.
+
+---
+
+## `[idle_life]` — 8 settings
+
+During long quiet stretches a companion may sit down for a smoke, a drink or a bite
+to eat, using the base game's own idle animations. Purely cosmetic: no healing, no
+buff, no item consumed.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `idle_life_enabled` | `true` | During long quiet stretches a companion may sit down for a smoke, a drink or a bite. Interrupted instantly by contact. **Master switch.** |
+| `idle_life_min_seconds` | `25` | Shortest an idle animation lasts, in seconds. |
+| `idle_life_max_seconds` | `90` | Longest an idle animation lasts, in seconds. A companion has to earn another calm stretch before it can start a second one. |
+| `idle_life_calm_seconds` | `25` | How long a companion must have had nothing to shoot at before it will start. Deliberately longer than `idle_callout_needs_calm_seconds`: lighting a cigarette in the zone claims more safety than saying something does. |
+| `idle_life_max_concurrent` | `1` | How many companions may be animating at once, across the whole squad. `1` means you see one of them take a break, not all of them. |
+| `idle_life_smoke_weight` | `40` | Relative chance of a cigarette. The three weights are compared against each other, so any scale works. |
+| `idle_life_drink_weight` | `30` | Relative chance of a drink. |
+| `idle_life_eat_weight` | `30` | Relative chance of a bite to eat. Set all three to `0` to leave the feature on but silent. |
+
+> **Nothing about this makes a companion less useful.** It only starts when you have
+> stopped moving and the squad has had a genuinely quiet stretch, and it ends on the
+> first of: a target, a bullet within 96 pixels, you walking off, the companion being
+> wounded, or its own timer running out. There is no wind-down and no animation to
+> finish — the prop is dropped on the frame it is needed to be.
+>
+> The weights also carry a per-companion favourite, so over a long game the same
+> companion tends to be the one who smokes. That is deliberate.
+
+---
+
+## `[desync]` — 6 settings
+
+Everything that stops a squad reading as one brain in four bodies. Each companion
+gets its own timing and its own personality, derived from its squad slot so that
+"the cautious one" is the same one every raid.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `desync_enabled` | `true` | Give each companion its own timing, reaction delay and follow distance, so a squad stops moving in lockstep. **Master switch.** |
+| `desync_seed_from_slot` | `true` | Derive each companion's personal numbers from its squad slot instead of at random, so the same slot behaves the same way every raid. Off = fresh random every spawn. |
+| `desync_tick_jitter` | `3` | Frames of spread in when companions take their decisions. **Do not raise above 3** — vanilla's own think interval is short, and more than this shows up as visible hesitation. |
+| `desync_reaction_jitter_frames` | `6` | Extra frames, up to this many, that one companion holds a committed move longer than another. Pure variation; it does not slow anyone's shooting. |
+| `desync_follow_distance_jitter` | `8` | Pixels of personal offset added to a companion's formation distance, so they do not all sit at the same radius. |
+| `temperament_enabled` | `true` | Each companion gets a fixed personality score that nudges how eagerly it pushes and how often it talks. Off = every companion behaves identically. |
+
+> **Temperament nudges, it does not gate.** An aggressive companion closes from a
+> little further out and holds a move a little longer; a cautious one waits until the
+> gap is larger. No companion is given a behaviour another one does not have, and
+> none of it touches accuracy, health or damage.
+
+---
+
 ## `[input]` — 6 settings
 
 Values are **GameMaker virtual key codes**, not letters:
@@ -500,3 +650,48 @@ when they are off screen.
 **"I want no recruiter, just free companions."**
 `recruiter_enabled = false`, plus `debug_enabled = true` to enable the F6 free
 spawn.
+
+**"I want exactly the 1.1.x behaviour back."**
+Set the five master switches to `false`:
+
+```ini
+push_enabled = false
+idle_callouts_enabled = false
+selfcare_enabled = false
+idle_life_enabled = false
+desync_enabled = false
+```
+
+With those off the mod writes nothing it did not write in 1.1.1 — no footwork, no
+new speech, no bandages, no animations, no per-companion variation. That is also the
+first thing to try if a companion starts behaving oddly: turn them off one at a time
+to find which one owns the problem.
+
+**"They advance too far and get shot."**
+Lower `push_max_from_player` (try `160`) and raise `push_stop_distance` (try `140`).
+The first is the leash to you, the second is how close they will ever get to the
+enemy. `push_enabled = false` removes advancing entirely while leaving them shooting.
+
+**"They still feel like turrets."**
+Lower `push_min_distance` to `140` so they push from closer in, lower
+`reposition_after_frames` to `120` so the anti-turret backstop fires twice as often,
+and raise `push_speed_mult` to `1.6`.
+
+**"The squad talks too much."**
+Raise `callout_squad_cooldown_seconds` to `30` and `idle_callout_min_seconds` to
+`120`. For silence with everything else intact, `idle_callouts_enabled = false` —
+`push_callout_chance = 0` and `selfcare_callout_enabled = false` remove the two
+base-game barks as well.
+
+**"I want them tougher without making them bullet sponges."**
+`selfcare_charges = 4` and `selfcare_heal_fraction = 0.35`. That buys a companion
+staying power it has to stop shooting to use, which is a very different thing from
+raising `hp_multiplier`.
+
+**"I never want to see a companion sitting down."**
+`idle_life_enabled = false`. To keep it but make it rarer, raise
+`idle_life_calm_seconds` to `60`.
+
+**"I want all companions to behave identically."**
+`desync_enabled = false` and `temperament_enabled = false`. Useful when you are
+comparing two config changes and need the squad to be a controlled experiment.
