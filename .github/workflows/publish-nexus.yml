@@ -44,6 +44,9 @@ on:
         required: false
         type: boolean
         default: false
+      changelog_source_version:
+        description: "Version whose CHANGELOG.md notes to use; defaults to version."
+        required: false
 
 permissions:
   contents: read
@@ -112,9 +115,12 @@ jobs:
         if: ${{ steps.cfg.outputs.configured == 'true' }}
         env:
           VERSION: ${{ steps.ver.outputs.version }}
+          SOURCE_VERSION: ${{ inputs.changelog_source_version }}
         run: |
           set -euo pipefail
-          BLOCK="$(python3 - "$VERSION" <<'PY'
+          NOTES_VERSION="${SOURCE_VERSION#v}"
+          [ -z "$NOTES_VERSION" ] && NOTES_VERSION="$VERSION"
+          BLOCK="$(python3 - "$NOTES_VERSION" <<'PY'
           import re, sys
 
           ver = sys.argv[1]
@@ -167,7 +173,7 @@ jobs:
           PY
           )"
           if [ -z "$BLOCK" ]; then
-            echo "::warning::no '## [$VERSION]' section in CHANGELOG.md -- uploading without a description"
+            echo "::warning::no '## [$NOTES_VERSION]' section in CHANGELOG.md -- uploading without a description"
           fi
           {
             echo "text<<CSQ_NOTES_EOF"
