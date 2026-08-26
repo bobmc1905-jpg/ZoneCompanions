@@ -39,6 +39,11 @@ on:
       version:
         description: "Version to publish, e.g. 1.1.1. Defaults to the latest release."
         required: false
+      changelog_only:
+        description: "Add this version's changelog without uploading or changing a file."
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -68,6 +73,7 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Download the release archive
+        if: ${{ !inputs.changelog_only }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -83,13 +89,19 @@ jobs:
         env:
           NEXUS_KEY: ${{ secrets.NEXUSMODS_API_KEY }}
           FILE_ID: ${{ vars.NEXUS_FILE_ID }}
+          MOD_ID: ${{ vars.NEXUS_MOD_ID }}
+          CHANGELOG_ONLY: ${{ inputs.changelog_only }}
         run: |
           set -euo pipefail
           MISSING=""
           [ -z "${NEXUS_KEY:-}" ] && MISSING="the NEXUSMODS_API_KEY secret"
-          [ -z "${FILE_ID:-}" ]   && MISSING="${MISSING:+$MISSING and }the NEXUS_FILE_ID variable"
+          if [ "${CHANGELOG_ONLY:-false}" = "true" ]; then
+            [ -z "${MOD_ID:-}" ] && MISSING="${MISSING:+$MISSING and }the NEXUS_MOD_ID variable"
+          else
+            [ -z "${FILE_ID:-}" ] && MISSING="${MISSING:+$MISSING and }the NEXUS_FILE_ID variable"
+          fi
           if [ -n "$MISSING" ]; then
-            echo "::notice::Nexus upload skipped -- still missing $MISSING. Create the mod page and its first file by hand, then add them."
+            echo "::notice::Nexus publication skipped -- still missing $MISSING."
             echo "configured=false" >> "$GITHUB_OUTPUT"
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
@@ -163,6 +175,29 @@ jobs:
             echo "CSQ_NOTES_EOF"
           } >> "$GITHUB_OUTPUT"
 
+      # A one-off historical release may need its notes backfilled after its file
+      # has already been published. Do that directly through the same v3 endpoint
+      # the upload action uses, instead of creating a duplicate file version.
+      - name: Add a changelog-only entry
+        if: ${{ steps.cfg.outputs.configured == 'true' && inputs.changelog_only }}
+        env:
+          NEXUS_KEY: ${{ secrets.NEXUSMODS_API_KEY }}
+          MOD_ID: ${{ vars.NEXUS_MOD_ID }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          CHANGELOG: ${{ steps.notes.outputs.text }}
+        run: |
+          set -euo pipefail
+          if [ -z "$CHANGELOG" ]; then
+            echo "::error::no CHANGELOG.md section for $VERSION"
+            exit 1
+          fi
+          curl --fail-with-body --show-error --request POST \
+            --header "apikey: $NEXUS_KEY" \
+            --header "Content-Type: application/json" \
+            --header "User-Agent: ZoneCompanions-publish-workflow" \
+            --data "$(jq -cn --arg version "$VERSION" --arg changelog "$CHANGELOG" '{version: $version, changelog: $changelog}')" \
+            "https://api.nexusmods.com/v3/mods/$MOD_ID/changelogs"
+
       # Pinned to a tag rather than a moving ref: this is a beta action and the
       # upload API it talks to is itself in open beta.
       #
@@ -171,7 +206,7 @@ jobs:
       # makes the page's version number follow the release. changelog is only sent
       # when NEXUS_MOD_ID is set, because the API rejects one without it.
       - name: Upload to Nexus Mods
-        if: ${{ steps.cfg.outputs.configured == 'true' }}
+        if: ${{ steps.cfg.outputs.configured == 'true' && !inputs.changelog_only }}
         uses: Nexus-Mods/upload-action@c96019556046053aa26044b44396cd38929daf23 # v1.0.0-beta.10
         with:
           api_key: ${{ secrets.NEXUSMODS_API_KEY }}
